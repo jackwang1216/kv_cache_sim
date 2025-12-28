@@ -1,0 +1,3 @@
+/Users/jackwang/Documents/Projects/kv_cache_sim/cpp/build/CMakeFiles/kv_sim.dir
+/Users/jackwang/Documents/Projects/kv_cache_sim/cpp/build/CMakeFiles/edit_cache.dir
+/Users/jackwang/Documents/Projects/kv_cache_sim/cpp/build/CMakeFiles/rebuild_cache.dir
