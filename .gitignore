@@ -1,0 +1,26 @@
+# Build artifacts
+cpp/build/
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+*.o
+*.obj
+*.out
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Generated runs and figures
+runs/
+figures/
+reports/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+project_overview.pdf

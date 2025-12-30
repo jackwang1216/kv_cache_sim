@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <queue>
+#include <deque>
 #include "types.hpp"
 #include "events.hpp"
 #include "rng.hpp"
@@ -19,6 +20,8 @@ private:
     void on_start_decode(const Event& event);
     void on_finish(const Event& event);
 
+    void try_start_prefill();
+
     double prefill_duration_ms(int prompt_tokens) const;
     double decode_duration_ms(int gen_tokens, int active_decode) const;
     bool can_admit_prompt(int prompt_tokens) const;
@@ -30,6 +33,7 @@ private:
     SimConfig cfg_;
     std::vector<Request> requests_;
     std::priority_queue<Event, std::vector<Event>, EventCompare> pq_;
+    std::deque<int> prefill_queue_;
     double now_ms_ = 0.0;
     std::uint64_t vram_used_ = 0;
     int active_prefill_ = 0;
