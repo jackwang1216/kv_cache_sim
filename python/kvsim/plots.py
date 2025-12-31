@@ -56,3 +56,21 @@ def plot_bar_metric(df: pd.DataFrame, metric: str, label_col: str, out_path=None
         plt.savefig(out_path, dpi=120)
     else:
         plt.show()
+
+def plot_compare_metric(df: pd.DataFrame, metric: str, label_col: str,
+                        out_path=None, title=None, kind="bar"):
+    if metric not in df or label_col not in df:
+        return
+    plt.figure()
+    if kind == "bar":
+        plt.bar(df[label_col], df[metric])
+    else:
+        plt.plot(df[label_col], df[metric], marker="o")
+    plt.xticks(rotation=45, ha="right")
+    plt.ylabel(metric)
+    plt.title(title or metric)
+    plt.tight_layout()
+    if out_path:
+        plt.savefig(out_path, dpi=120)
+    else:
+        plt.show()
