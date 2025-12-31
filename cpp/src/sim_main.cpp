@@ -25,7 +25,6 @@ int main(int argc, char** argv) {
             return 1;
         }
     } else {
-        // Fallback demo data
         reqs.push_back(Request{"req1", 0.0, 200, 400, false});
         reqs.push_back(Request{"req2", 50.0, 150, 300, false});
     }
@@ -33,8 +32,10 @@ int main(int argc, char** argv) {
     Simulator sim(cfg, std::move(reqs));
     sim.run();
 
-    if (!write_summary(out_dir, sim.requests(), err)) {
-        std::cerr << "write_summary error: " << err << "\n";
-    }
+    if (!write_summary(out_dir, sim.requests(), err)) std::cerr << "write_summary error: " << err << "\n";
+    if (!write_timeseries_csv(out_dir, sim.samples(), err)) std::cerr << "write_timeseries error: " << err << "\n";
+    if (!write_events_jsonl(out_dir, sim.events(), err)) std::cerr << "write_events error: " << err << "\n";
+    if (!write_run_meta(out_dir, cfg, err)) std::cerr << "write_run_meta error: " << err << "\n";
+
     return 0;
 }

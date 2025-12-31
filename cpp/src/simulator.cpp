@@ -1,17 +1,22 @@
 #include <iostream>
+#include <algorithm>
 #include "simulator.hpp"
 
 Simulator::Simulator(SimConfig cfg, std::vector<Request> requests)
-    : cfg_(cfg), requests_(std::move(requests)) {}
+    : cfg_(cfg), 
+    requests_(std::move(requests)),
+    next_sample_ms_(cfg.timeseries_dt_ms) {}
 
 void Simulator::run() {
     schedule_arrivals();
+    sample_until(0.0);
 
     while (!pq_.empty()) {
         Event event = pq_.top();
         pq_.pop();
         now_ms_ = event.time_ms;
         handle_event(event);
+        sample_until(now_ms_);
     }
 
     int finished{0}, rejected{0};
@@ -73,6 +78,8 @@ void Simulator::on_arrival(const Event& event) {
 
     if (!ok) {
         req.state = RequestState::Rejected;
+        rejects_total_++;
+        record_event(EventType::Reject, req);
         return;
     }
 
@@ -80,18 +87,48 @@ void Simulator::on_arrival(const Event& event) {
     int active = active_prefill_ + active_decode_;
     if (queued + active >= cfg_.policy.max_queue) {
         req.state = RequestState::Rejected;
+        rejects_total_++;
+        record_event(EventType::Reject, req);
         return;
     }
-    allocate_kv(req.prompt_tokens);
+    // Reserve KV: prompt always; decode tokens only if safe_reservation is enabled.
+    int reserved_tokens = req.prompt_tokens + (cfg_.policy.safe_reservation ? req.gen_tokens : 0);
+    allocate_kv(reserved_tokens);
     req.state = RequestState::Queued;
-    prefill_queue_.push_back(event.request_index);
-    try_start_prefill();
+    record_event(EventType::Arrival, req);
+    if (active_prefill_ + active_decode_ < cfg_.gpu.max_concurrent) {
+        pq_.push(Event{now_ms_, EventType::StartPrefill, event.request_index});
+    } else {
+        prefill_queue_.push_back(event.request_index);
+    }
+}
+
+int Simulator::pick_next_from_queue() {
+    if (prefill_queue_.empty()) return -1;
+    if (cfg_.policy.scheduling == SchedulingMode::FIFO) {
+        int idx = prefill_queue_.front();
+        prefill_queue_.pop_front();
+        return idx;
+    }
+    // Shortest remaining
+    auto best_it = prefill_queue_.begin();
+    int best_tokens = requests_[*best_it].prompt_tokens + requests_[*best_it].gen_tokens;
+    for (auto it = std::next(prefill_queue_.begin()); it != prefill_queue_.end(); ++it) {
+        int tokens = requests_[*it].prompt_tokens + requests_[*it].gen_tokens;
+        if (tokens < best_tokens) {
+            best_it = it;
+            best_tokens = tokens;
+        }
+    }
+    int idx = *best_it;
+    prefill_queue_.erase(best_it);
+    return idx;
 }
 
 void Simulator::try_start_prefill() {
     while (!prefill_queue_.empty() && active_prefill_ + active_decode_ < cfg_.gpu.max_concurrent) {
-        int req_idx = prefill_queue_.front();
-        prefill_queue_.pop_front();
+        int req_idx = pick_next_from_queue();
+        if (req_idx < 0) break;
         pq_.push(Event{now_ms_, EventType::StartPrefill, req_idx});
     }
 }
@@ -101,7 +138,7 @@ void Simulator::on_start_prefill(const Event& event) {
     req.state = RequestState::Prefill;
     req.start_prefill_ms = now_ms_;
     active_prefill_++;
-
+    record_event(EventType::StartPrefill, req);
     double duration = prefill_duration_ms(req.prompt_tokens);
     pq_.push(Event{now_ms_ + duration, EventType::StartDecode, event.request_index});
 }
@@ -112,7 +149,10 @@ void Simulator::on_start_decode(const Event& event) {
     req.state = RequestState::Decode;
     req.start_decode_ms = now_ms_;
     active_decode_++;
-
+    if (!cfg_.policy.safe_reservation) {
+        allocate_kv(req.gen_tokens);
+    }
+    record_event(EventType::StartDecode, req);
     double duration = decode_duration_ms(req.gen_tokens, active_decode_);
     pq_.push(Event{now_ms_ + duration, EventType::Finish, event.request_index});
 }
@@ -122,7 +162,29 @@ void Simulator::on_finish(const Event& event) {
     active_decode_--;
     req.state = RequestState::Finished;
     req.finish_ms = now_ms_;
-
+    tokens_generated_total_ += static_cast<std::uint64_t>(req.gen_tokens);
+    record_event(EventType::Finish, req);
     free_kv(req.prompt_tokens + req.gen_tokens);
     try_start_prefill();
+}
+
+void Simulator::record_event(EventType type, const Request& req) {
+    events_.push_back(EventRecord{now_ms_, type, req.id});
+}
+
+void Simulator::sample_until(double target_time_ms) {
+    while (next_sample_ms_ <= target_time_ms) {
+        TimeseriesSample s;
+        s.time_ms = next_sample_ms_;
+        s.vram_used = vram_used_;
+        s.active_prefill = active_prefill_;
+        s.active_decode = active_decode_;
+        s.queue_depth = static_cast<int>(prefill_queue_.size());
+        s.tokens_generated_delta = tokens_generated_total_ - last_tokens_sampled_;
+        s.rejects_delta = rejects_total_ - last_rejects_sampled_;
+        samples_.push_back(s);
+        last_tokens_sampled_ = tokens_generated_total_;
+        last_rejects_sampled_ = rejects_total_;
+        next_sample_ms_ += cfg_.timeseries_dt_ms;
+    }
 }

@@ -55,3 +55,23 @@
 
 **Later steps**
 - Memory-pressure behaviors (reject-on-pressure now; evict later), batching/shared throughput model, validation scenarios, Python sweep/plots integration, web viewer if desired.
+
+## 2025-12-31 — Outputs, policies, queue fixes
+
+**What we added/changed**
+- Added scheduling mode support (FIFO, ShortestRemaining) in `PolicyConfig` and queue picker.
+- Added event/timeseries data structures (`EventRecord`, `TimeseriesSample`) and accessors from `Simulator`.
+- Simulator now records lifecycle events and samples timeseries at `timeseries_dt_ms`.
+- Output writers expanded: `summary.json` (finished/rejected + p50/p95 latency), `timeseries.csv`, `events.jsonl`, `run_meta.json`. Improved output dir creation robustness.
+- KV accounting fixed: if `safe_reservation` is on, reserve prompt+gen at arrival; otherwise reserve prompt at arrival and gen at decode start; free prompt+gen at finish.
+- Queue/admission corrected: enforce `max_queue`, schedule immediately if capacity is free, otherwise enqueue; uses scheduling policy to pick next.
+- Added `Enqueue` event type and handled string mapping.
+
+**What we ran**
+- Sample config `configs/example_basic.txt` + trace `data/trace_demo.txt`; run: `./kv_sim configs/example_basic.txt data/trace_demo.txt runs/demo_basic3` (or `demo_basic4`). Outputs include summary/timeseries/events/meta under `runs/`.
+
+**Next steps**
+- Enhance summary metrics: throughput (tokens/sec), TTFT (if streaming), p99 latency, avg VRAM, GPU busy time.
+- Add events for reject/evict/oom as policies expand; add run_meta fields (config hash, seed, timestamp, scenario name).
+- Add batching/shared-throughput model and optionally a simple eviction policy.
+- Validate with micro-scenarios (low-load, saturation, VRAM monotonicity) and wire Python to recompute/plot metrics.

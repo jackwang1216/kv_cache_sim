@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include "events.hpp"
 
 enum class RequestState {
     Arrived, 
@@ -10,6 +11,27 @@ enum class RequestState {
     Finished, 
     Rejected, 
     Evicted
+};
+
+enum class SchedulingMode {
+    FIFO,
+    ShortestRemaining
+};
+
+struct EventRecord {
+    double time_ms = 0.0;
+    EventType type = EventType::Arrival;
+    std::string request_id;
+};
+
+struct TimeseriesSample {
+    double time_ms = 0.0;
+    std::uint64_t vram_used = 0;
+    int active_prefill = 0;
+    int active_decode = 0;
+    int queue_depth = 0;
+    std::uint64_t tokens_generated_delta = 0;
+    int rejects_delta = 0;
 };
 
 struct Request {
@@ -36,6 +58,7 @@ struct PolicyConfig {
     bool safe_reservation = true; 
     int max_queue = 1024;
     std::uint64_t kv_bytes_per_token = 2048;
+    SchedulingMode scheduling = SchedulingMode::FIFO;
 };
 
 struct SimConfig {

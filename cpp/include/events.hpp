@@ -2,10 +2,11 @@
 #include <cstdint>
 
 enum class EventType {
-    Arrival, 
+    Arrival,
+    Enqueue,
     StartPrefill,
     StartDecode,
-    Finish, 
+    Finish,
     Reject,
     Evict
 };
