@@ -204,16 +204,19 @@ req3 100 180 320 0`);
               <PlotCard
                 title="VRAM over time"
                 x={derived.t}
+                yTitle="bytes"
                 traces={[{ name: 'VRAM', y: derived.vram }]}
               />
               <PlotCard
                 title="Queue depth over time"
                 x={derived.t}
+                yTitle="depth"
                 traces={[{ name: 'Queue', y: derived.queue }]}
               />
               <PlotCard
                 title="Tokens/sec over time"
                 x={derived.t}
+                yTitle="tokens/sec"
                 traces={[{ name: 'Tokens/sec', y: derived.tps }]}
               />
             </div>
