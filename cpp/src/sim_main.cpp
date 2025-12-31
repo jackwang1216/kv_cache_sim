@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
     Simulator sim(cfg, std::move(reqs));
     sim.run();
 
-    if (!write_summary(out_dir, sim.requests_view_for_output(), err)) { // see note below
+    if (!write_summary(out_dir, sim.requests(), err)) {
         std::cerr << "write_summary error: " << err << "\n";
     }
     return 0;

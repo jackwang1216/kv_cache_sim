@@ -78,8 +78,8 @@ void Simulator::on_arrival(const Event& event) {
 
     int queued = static_cast<int>(prefill_queue_.size());
     int active = active_prefill_ + active_decode_;
-    if (queued + active < cfg_.gpu.max_concurrent) {
-        req.state = RequestState::Queued;
+    if (queued + active >= cfg_.policy.max_queue) {
+        req.state = RequestState::Rejected;
         return;
     }
     allocate_kv(req.prompt_tokens);

@@ -33,3 +33,25 @@
 - Batching/shared throughput model (divide throughput by active decodes, cap by batch tokens).
 - Validation scenarios: low-load sanity, saturation curve, VRAM monotonicity, long-context tail.
 - Integrate with Python runner for sweeps/plots once binary outputs are stable.
+
+## 2025-12-30 — IO split, sample inputs, runnable demo
+
+**What we added/changed**
+- Split simulator logic into `src/simulator.cpp`; slim `sim_main.cpp` now wires config/trace IO and runs the engine.
+- Added IO helpers: `io_config` (load engine settings), `io_trace` (load replay trace), `io_output` (write minimal summary).
+- Added getter `Simulator::requests()` for outputs.
+- Fixed CMake target name to `kv_sim` and included all sources.
+- Created sample inputs:
+  - `configs/example_basic.txt`: 8 GiB VRAM, concurrency 2, prefill/decode tps 1200/600, kv_bytes_per_token 2048, safe reservation on, max_queue 1024, timeseries_dt_ms 20.
+  - `data/trace_demo.txt`: three requests (req1/req2/req3) with arrivals and prompt/gen tokens, non-streaming.
+- Ran demo build + run; produced `runs/demo_basic/summary.json` with finished=2, rejected=0.
+
+**Next steps (near-term)**
+- Expand outputs: `summary.json` with latency/throughput/TTFT/VRAM stats; `timeseries.csv`; `events.jsonl`; `run_meta.json`.
+- Add queue correctness: ensure arrivals allocate KV and start immediately when capacity exists; continue to respect `max_queue`.
+- Add scheduling toggle (FIFO vs shortest-remaining) and finalize admission behavior.
+- Add timeseries sampling hook in the event loop at `timeseries_dt_ms`.
+- Wire CLI flags for config/trace/out/seed cleanly (current positional arguments are minimal).
+
+**Later steps**
+- Memory-pressure behaviors (reject-on-pressure now; evict later), batching/shared throughput model, validation scenarios, Python sweep/plots integration, web viewer if desired.

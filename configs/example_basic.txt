@@ -1,0 +1,9 @@
+vram_bytes 8589934592        # 8 GiB
+max_concurrent 2
+prefill_tps 1200
+decode_tps 600
+kv_bytes_per_token 2048
+safe_reservation 1
+max_queue 1024
+timeseries_dt_ms 20
+

@@ -11,6 +11,7 @@ public:
     Simulator(SimConfig cfg, std::vector<Request> requests);
     
     void run();
+    const std::vector<Request>& requests() const { return requests_; }
 
 private:
     void schedule_arrivals();

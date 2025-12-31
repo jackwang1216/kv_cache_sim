@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.14)
-project(kv_sum LANGUAGES CXX)
+project(kv_sim LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_executable(
-    kv_sum
+    kv_sim
     src/sim_main.cpp
     src/simulator.cpp
     src/io_config.cpp
