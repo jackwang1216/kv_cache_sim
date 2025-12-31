@@ -1,0 +1,5 @@
+# id arrival_ms prompt_tokens gen_tokens streaming(0/1)
+req1 0    200 400 0
+req2 500  150 300 0
+req3 1000 180 320 0
+

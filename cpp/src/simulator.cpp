@@ -6,6 +6,7 @@ Simulator::Simulator(SimConfig cfg, std::vector<Request> requests)
     : cfg_(cfg),
       requests_(std::move(requests)),
       lru_iters_(requests_.size(), lru_list_.end()),
+      allocated_bytes_(requests_.size(), 0),
       next_sample_ms_(cfg.timeseries_dt_ms) {}
 
 void Simulator::run() {
@@ -20,12 +21,15 @@ void Simulator::run() {
         sample_until(now_ms_);
     }
 
-    int finished{0}, rejected{0};
+    int finished{0}, rejected{0}, evicted{0};
     for (const auto& req : requests_) {
         if (req.state == RequestState::Finished) finished++;
         if (req.state == RequestState::Rejected) rejected++;
+        if (req.state == RequestState::Evicted) evicted++;
     }
-    std::cout << "Finished: " << finished << ", Rejected: " << rejected << '\n';
+    std::cout << "Finished: " << finished
+              << ", Rejected: " << rejected
+              << ", Evicted: " << evicted << '\n';
     sim_end_ms_ = now_ms_;
 }
 
@@ -55,12 +59,19 @@ bool Simulator::can_reserve_decode(int prompt_tokens, int gen_tokens) const {
     return vram_used_ + need <= cfg_.gpu.vram_bytes;
 }
 
-void Simulator::allocate_kv(int tokens) {
-    vram_used_ += static_cast<std::uint64_t>(tokens) * cfg_.policy.kv_bytes_per_token;
+void Simulator::allocate_kv_bytes(int req_idx, std::uint64_t bytes) {
+    vram_used_ += bytes;
+    allocated_bytes_[req_idx] += bytes;
 }
 
-void Simulator::free_kv(int tokens) {
-    vram_used_ -= static_cast<std::uint64_t>(tokens) * cfg_.policy.kv_bytes_per_token;
+void Simulator::free_kv_bytes(int req_idx, std::uint64_t bytes) {
+    std::uint64_t to_free = std::min(bytes, allocated_bytes_[req_idx]);
+    if (to_free > vram_used_) {
+        vram_used_ = 0;
+    } else {
+        vram_used_ -= to_free;
+    }
+    allocated_bytes_[req_idx] -= to_free;
 }
 
 double Simulator::prefill_duration_ms(int prompt_tokens) const {
@@ -77,6 +88,9 @@ double Simulator::decode_duration_ms(int gen_tokens, int active_decode) const {
 
 void Simulator::on_arrival(const Event& event) {
     auto& req = requests_[event.request_index];
+    if (req.state == RequestState::Evicted || req.state == RequestState::Rejected || req.state == RequestState::Finished) {
+        return;
+    }
     int queued = static_cast<int>(prefill_queue_.size());
     int active = active_prefill_ + active_decode_;
     if (queued + active >= cfg_.policy.max_queue) {
@@ -95,7 +109,7 @@ void Simulator::on_arrival(const Event& event) {
         record_event(EventType::Reject, req);
         return;
     }
-    allocate_kv(reserved_tokens);
+    allocate_kv_bytes(event.request_index, need);
     req.state = RequestState::Queued;
     record_event(EventType::Arrival, req);
 
@@ -142,6 +156,9 @@ void Simulator::try_start_prefill() {
 
 void Simulator::on_start_prefill(const Event& event) {
     auto& req = requests_[event.request_index];
+    if (req.state == RequestState::Evicted || req.state == RequestState::Rejected || req.state == RequestState::Finished) {
+        return;
+    }
     req.state = RequestState::Prefill;
     req.start_prefill_ms = now_ms_;
     active_prefill_++;
@@ -153,6 +170,9 @@ void Simulator::on_start_prefill(const Event& event) {
 
 void Simulator::on_start_decode(const Event& event) {
     auto& req = requests_[event.request_index];
+    if (req.state == RequestState::Evicted || req.state == RequestState::Rejected || req.state == RequestState::Finished) {
+        return;
+    }
     active_prefill_--;
     req.state = RequestState::Decode;
     req.start_decode_ms = now_ms_;
@@ -163,10 +183,10 @@ void Simulator::on_start_decode(const Event& event) {
             req.state = RequestState::Rejected;
             rejects_total_++;
             record_event(EventType::Reject, req);
-            free_kv(req.prompt_tokens);
+            free_kv_bytes(event.request_index, static_cast<std::uint64_t>(req.prompt_tokens) * cfg_.policy.kv_bytes_per_token);
             return;
         }
-        allocate_kv(req.gen_tokens);
+        allocate_kv_bytes(event.request_index, need);
     }
     touch_lru(event.request_index);
     record_event(EventType::StartDecode, req);
@@ -176,12 +196,15 @@ void Simulator::on_start_decode(const Event& event) {
 
 void Simulator::on_finish(const Event& event) {
     auto& req = requests_[event.request_index];
+    if (req.state == RequestState::Evicted || req.state == RequestState::Rejected || req.state == RequestState::Finished) {
+        return;
+    }
     active_decode_--;
     req.state = RequestState::Finished;
     req.finish_ms = now_ms_;
     tokens_generated_total_ += static_cast<std::uint64_t>(req.gen_tokens);
     record_event(EventType::Finish, req);
-    free_kv(req.prompt_tokens + req.gen_tokens);
+    free_kv_bytes(event.request_index, allocated_bytes_[event.request_index]);
 
     // Clean eviction tracking (lazy remove)
     if (cfg_.policy.eviction_policy == EvictionPolicy::LRU) {
@@ -261,9 +284,22 @@ bool Simulator::evict_one() {
     if (req.state == RequestState::Rejected || req.state == RequestState::Evicted || req.state == RequestState::Finished) {
         return false; // skip invalid victim
     }
-    free_kv(req.prompt_tokens + req.gen_tokens);
+    // Adjust active counters and queue bookkeeping
+    if (req.state == RequestState::Prefill) {
+        if (active_prefill_ > 0) active_prefill_--;
+    } else if (req.state == RequestState::Decode) {
+        if (active_decode_ > 0) active_decode_--;
+    } else if (req.state == RequestState::Queued) {
+        // remove from prefill_queue_ if present
+        prefill_queue_.erase(
+            std::remove(prefill_queue_.begin(), prefill_queue_.end(), victim),
+            prefill_queue_.end());
+    }
+    free_kv_bytes(victim, allocated_bytes_[victim]);
     req.state = RequestState::Evicted;
     record_event(EventType::Evict, req);
+    // After freeing, try to start more work
+    try_start_prefill();
     return true;
 }
 

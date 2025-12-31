@@ -34,8 +34,8 @@ private:
     double decode_duration_ms(int gen_tokens, int active_decode) const;
     bool can_admit_prompt(int prompt_tokens) const;
     bool can_reserve_decode(int prompt_tokens, int gen_tokens) const;
-    void allocate_kv(int tokens);
-    void free_kv(int tokens);
+    void allocate_kv_bytes(int req_idx, std::uint64_t bytes);
+    void free_kv_bytes(int req_idx, std::uint64_t bytes);
 
     bool ensure_capacity_for(std::uint64_t bytes_needed);
     bool evict_one();
@@ -49,6 +49,7 @@ private:
     std::deque<int> evict_queue_;
     std::list<int> lru_list_;
     std::vector<std::list<int>::iterator> lru_iters_;
+    std::vector<std::uint64_t> allocated_bytes_;
     std::vector<EventRecord> events_;
     std::vector<TimeseriesSample> samples_;
 

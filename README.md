@@ -133,3 +133,36 @@ Instead, it models their *performance and memory consequences*, which is the rel
 - FasterTransformer / TGI
 - Production LLM serving systems
 - Queueing theory & tail-latency analysis
+
+---
+
+## Quick Validation Scenarios (sanity checks)
+
+Run from repo root (examples):
+
+- Low load (no pressure, expect rejects/evicts = 0, latency ≈ service time):
+  ```
+  ./cpp/build/kv_sim configs/validation_low_load.txt data/validation_low_load.txt runs/val_low_load
+  ```
+
+- Saturation (tight VRAM + frequent arrivals, expect queue growth and evictions):
+  ```
+  ./cpp/build/kv_sim configs/validation_saturation.txt data/validation_saturation.txt runs/val_saturation
+  ```
+
+- VRAM monotonicity (same trace, low vs high VRAM; higher VRAM should not worsen rejects/evicts):
+  ```
+  ./cpp/build/kv_sim configs/validation_vram_low.txt data/validation_vram_base.txt runs/val_vram_low
+  ./cpp/build/kv_sim configs/validation_vram_high.txt data/validation_vram_base.txt runs/val_vram_high
+  ```
+
+- Long-context tail (mix of shorts + one long; expect higher p95/p99 vs shorts-only baseline):
+  ```
+  ./cpp/build/kv_sim configs/validation_long_tail.txt data/validation_long_tail.txt runs/val_long_tail
+  ```
+
+Expected outcomes (qualitative):
+- Low load: rejects=0, evictions=0, latency near (prompt/decode modeled times).
+- Saturation: p95/p99 higher than low-load; evictions > 0 under evict policy; queue_depth grows.
+- VRAM monotonicity: `val_vram_high` should have <= rejects/evicts vs `val_vram_low`.
+- Long tail: tail latencies (p95/p99) worsen vs a short-only mix; evictions may rise if pressure hits.
