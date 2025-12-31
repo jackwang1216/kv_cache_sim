@@ -26,6 +26,8 @@ bool write_summary(const std::string& out_dir,
                    const std::vector<TimeseriesSample>& samples,
                    std::uint64_t tokens_generated_total,
                    double sim_end_ms,
+                   const std::vector<EventRecord>& events,
+                   const SimConfig& cfg,
                    std::string& err) {
     if (!ensure_dir(out_dir, err)) return false;
     std::ofstream ofs(out_dir + "/summary.json");
@@ -81,6 +83,18 @@ bool write_summary(const std::string& out_dir,
         }
     }
 
+    // Policy strings and evict count
+    auto policy_to_str = [](MemoryPressurePolicy p) {
+        return (p == MemoryPressurePolicy::Evict) ? "evict" : "reject";
+    };
+    auto evict_policy_to_str = [](EvictionPolicy p) {
+        return (p == EvictionPolicy::LRU) ? "lru" : "fifo";
+    };
+    int evict_count = 0;
+    for (const auto& e : events) {
+        if (e.type == EventType::Evict) evict_count++;
+    }
+
     ofs << "{\n"
         << "  \"finished\": " << finished << ",\n"
         << "  \"rejected\": " << rejected << ",\n"
@@ -92,8 +106,15 @@ bool write_summary(const std::string& out_dir,
         << "  \"p99_latency_ms\": " << p99 << ",\n"
         << "  \"avg_vram_bytes\": " << avg_vram << ",\n"
         << "  \"gpu_busy_ms\": " << busy_ms << ",\n"
-        << "  \"makespan_ms\": " << makespan_ms << "\n"
-        << "}\n";
+        << "  \"makespan_ms\": " << makespan_ms << ",\n"
+        << "  \"memory_pressure_policy\": \"" << policy_to_str(cfg.policy.memory_pressure_policy) << "\",\n";
+    if (cfg.policy.memory_pressure_policy == MemoryPressurePolicy::Evict) {
+        ofs << "  \"eviction_policy\": \"" << evict_policy_to_str(cfg.policy.eviction_policy) << "\",\n"
+            << "  \"evictions\": " << evict_count << "\n";
+    } else {
+        ofs << "  \"evictions\": " << evict_count << "\n";
+    }
+    ofs << "}\n";
     return true;
 }
 

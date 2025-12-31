@@ -9,6 +9,8 @@ bool write_summary(
     const std::vector<TimeseriesSample>& samples, 
     std::uint64_t tokens_generated_total, 
     double sim_end_ms,
+    const std::vector<EventRecord>& events,
+    const SimConfig& cfg,
     std::string& err
 );
 bool write_timeseries_csv(const std::string& out_dir, const std::vector<TimeseriesSample>& samples, std::string& err);

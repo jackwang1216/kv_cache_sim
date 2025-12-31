@@ -6,4 +6,6 @@ kv_bytes_per_token 2048
 safe_reservation 1
 max_queue 1024
 timeseries_dt_ms 20
-
+scheduling fifo
+memory_pressure_policy evict
+eviction_policy lru

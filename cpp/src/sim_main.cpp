@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
     Simulator sim(cfg, std::move(reqs));
     sim.run();
 
-    if (!write_summary(out_dir, sim.requests(), sim.samples(), sim.tokens_generated_total(), sim.sim_end_ms(), err)){
+    if (!write_summary(out_dir, sim.requests(), sim.samples(), sim.tokens_generated_total(), sim.sim_end_ms(), sim.events(), cfg, err)){
         std::cerr << "write_summary error: " << err << "\n";
     }
     if (!write_timeseries_csv(out_dir, sim.samples(), err)) std::cerr << "write_timeseries error: " << err << "\n";

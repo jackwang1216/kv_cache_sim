@@ -18,6 +18,16 @@ enum class SchedulingMode {
     ShortestRemaining
 };
 
+enum class MemoryPressurePolicy {
+    Reject,
+    Evict
+};
+
+enum class EvictionPolicy {
+    FIFO,
+    LRU
+};
+
 struct EventRecord {
     double time_ms = 0.0;
     EventType type = EventType::Arrival;
@@ -59,6 +69,8 @@ struct PolicyConfig {
     int max_queue = 1024;
     std::uint64_t kv_bytes_per_token = 2048;
     SchedulingMode scheduling = SchedulingMode::FIFO;
+    MemoryPressurePolicy memory_pressure_policy = MemoryPressurePolicy::Reject;
+    EvictionPolicy eviction_policy = EvictionPolicy::FIFO;
 };
 
 struct SimConfig {

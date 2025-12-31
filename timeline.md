@@ -75,3 +75,25 @@
 - Add events for reject/evict/oom as policies expand; add run_meta fields (config hash, seed, timestamp, scenario name).
 - Add batching/shared-throughput model and optionally a simple eviction policy.
 - Validate with micro-scenarios (low-load, saturation, VRAM monotonicity) and wire Python to recompute/plot metrics.
+
+### 2025-12-31 — Outputs v2 (part 2)
+
+**What we added/changed**
+- Summary metrics expanded: throughput (tokens/sec), p50/p95/p99 latency, completion/reject rates, avg VRAM (time-weighted), GPU busy time, makespan.
+- Writers now accept samples and sim end time; added getters for totals/end time.
+- Sampling covers the tail interval (ensures averages include the end).
+- Output directory creation hardened (handles existing files/dirs with clearer errors).
+
+**Next steps**
+- Engine: add a memory-pressure policy switch (input-configurable): either reject-on-pressure or evict (FIFO/LRU). Emit evict/oom events; enforce the chosen policy, not as a fallback.
+- Engine: add basic batching/shared-throughput model (divide decode throughput by active decodes with a cap) and, if needed, streaming TTFT metric.
+- Config/CLI: expose scheduling mode, eviction toggle/policy, throughput sharing knobs; hash config into run_meta.
+- Validation: micro-suites for low-load sanity, saturation curve, VRAM monotonicity, and long-context tail.
+- Python: implement sweep runner, metrics recompute, and plots (latency vs VRAM, reject vs arrival rate, VRAM/time).
+
+
+<!-- 
+2) Throughput sharing: add a basic batching/shared-throughput model (e.g., divide decode throughput by active decodes with a cap); this brings the model closer to reality.
+3) Config/CLI polish: expose scheduling mode, eviction toggle/policy, throughput sharing knobs, and hash the config into run_meta.
+4) Validation suite: quick micro-scenarios for low-load sanity, saturation, VRAM monotonicity, and long-context tail.
+5) Python sweeps/plots: hook the binary into a sweep runner, recompute metrics in Python, and plot latency vs VRAM, reject vs arrival rate, VRAM over time. -->

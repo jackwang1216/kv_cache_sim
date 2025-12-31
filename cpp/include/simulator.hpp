@@ -2,6 +2,7 @@
 #include <vector>
 #include <queue>
 #include <deque>
+#include <list>
 #include "types.hpp"
 #include "events.hpp"
 #include "rng.hpp"
@@ -36,11 +37,18 @@ private:
     void allocate_kv(int tokens);
     void free_kv(int tokens);
 
+    bool ensure_capacity_for(std::uint64_t bytes_needed);
+    bool evict_one();
+    void touch_lru(int req_idx);
+
 private:
     SimConfig cfg_;
     std::vector<Request> requests_;
     std::priority_queue<Event, std::vector<Event>, EventCompare> pq_;
     std::deque<int> prefill_queue_;
+    std::deque<int> evict_queue_;
+    std::list<int> lru_list_;
+    std::vector<std::list<int>::iterator> lru_iters_;
     std::vector<EventRecord> events_;
     std::vector<TimeseriesSample> samples_;
 
