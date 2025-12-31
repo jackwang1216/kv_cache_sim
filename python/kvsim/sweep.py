@@ -9,9 +9,9 @@ def sweep(
     configs: List[str],
     traces: List[str],
     out_root: str,
-    seed: List[int]
+    seeds: List[int]
 ) -> List[Dict[str, Any]]:
-    result = []
+    results = []
     for cfg in configs:
         for tr in traces:
             for seed in seeds:
@@ -20,7 +20,7 @@ def sweep(
                 code = run_sim(binary_path, cfg, tr, out_dir, seed=seed)
                 if code == 0:
                     summary = read_summary(os.path.join(out_dir, "summary.json"))
-                    result.append({
+                    results.append({
                         "run_id": run_id,
                         "config": cfg,
                         "trace": tr,
@@ -28,4 +28,4 @@ def sweep(
                         **summary
                     })
 
-    return result
+    return results
