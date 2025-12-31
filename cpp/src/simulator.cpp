@@ -271,9 +271,18 @@ bool Simulator::ensure_capacity_for(std::uint64_t bytes_needed) {
 bool Simulator::evict_one() {
     int victim = -1;
     if (cfg_.policy.eviction_policy == EvictionPolicy::FIFO) {
-        if (evict_queue_.empty()) return false;
-        victim = evict_queue_.front();
-        evict_queue_.pop_front();
+        while (!evict_queue_.empty()) {
+            int cand = evict_queue_.front();
+            const auto& req = requests_[cand];
+            if (req.state == RequestState::Rejected || req.state == RequestState::Evicted || req.state == RequestState::Finished) {
+                evict_queue_.pop_front();
+                continue;
+            }
+            victim = cand;
+            evict_queue_.pop_front();
+            break;
+        }
+        if (victim == -1) return false;
     } else { //LRU
         if (lru_list_.empty()) return false;
         victim = lru_list_.back();

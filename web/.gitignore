@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.vite/
+.cache/
+.DS_Store
+

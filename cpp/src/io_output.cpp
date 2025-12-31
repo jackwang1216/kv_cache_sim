@@ -68,6 +68,21 @@ bool write_summary(const std::string& out_dir,
     double p95 = pct(0.95);
     double p99 = pct(0.99);
 
+    std::vector<double> ttfts;
+    for (const auto& r : reqs){
+        if (r.state == RequestState::Finished && r.start_decode_ms > 0.0) {
+            ttfts.push_back(r.start_decode_ms - r.arrival_time_ms);
+        }
+    }
+    auto pct_vec = [&](std::vector<double>& v, double p){
+        if (v.empty()) return 0.0;
+        std::sort(v.begin(), v.end());
+        size_t idx = static_cast<size_t>(p*(v.size()-1));
+        return v[idx];
+    };
+    double ttft_p50 = pct_vec(ttfts, 0.50);
+    double ttft_p95 = pct_vec(ttfts, 0.95);
+
     // Throughput (tokens/sec) over makespan
     double makespan_ms = sim_end_ms > 0 ? sim_end_ms : 0.0;
     double throughput_tps = (makespan_ms > 0.0)
@@ -119,6 +134,8 @@ bool write_summary(const std::string& out_dir,
         << "  \"p50_latency_ms\": " << p50 << ",\n"
         << "  \"p95_latency_ms\": " << p95 << ",\n"
         << "  \"p99_latency_ms\": " << p99 << ",\n"
+        << "  \"p50_ttft_ms\": " << ttft_p50 << ",\n"
+        << "  \"p95_ttft_ms\": " << ttft_p95 << ",\n"
         << "  \"avg_vram_bytes\": " << avg_vram << ",\n"
         << "  \"gpu_busy_ms\": " << busy_ms << ",\n"
         << "  \"makespan_ms\": " << makespan_ms << ",\n"
