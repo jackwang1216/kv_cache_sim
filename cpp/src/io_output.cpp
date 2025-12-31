@@ -21,11 +21,17 @@ static bool ensure_dir(const std::string& out_dir, std::string& err) {
     return true;
 }
 
-bool write_summary(const std::string& out_dir, const std::vector<Request>& reqs, std::string& err) {
+bool write_summary(const std::string& out_dir,
+                   const std::vector<Request>& reqs,
+                   const std::vector<TimeseriesSample>& samples,
+                   std::uint64_t tokens_generated_total,
+                   double sim_end_ms,
+                   std::string& err) {
     if (!ensure_dir(out_dir, err)) return false;
     std::ofstream ofs(out_dir + "/summary.json");
     if (!ofs.is_open()) { err = "cannot open summary"; return false; }
 
+    // Latencies
     std::vector<double> latencies;
     int finished = 0, rejected = 0;
     for (const auto& r : reqs) {
@@ -43,12 +49,50 @@ bool write_summary(const std::string& out_dir, const std::vector<Request>& reqs,
     };
     double p50 = pct(0.50);
     double p95 = pct(0.95);
+    double p99 = pct(0.99);
+
+    // Throughput (tokens/sec) over makespan
+    double makespan_ms = sim_end_ms > 0 ? sim_end_ms : 0.0;
+    double throughput_tps = (makespan_ms > 0.0)
+        ? (static_cast<double>(tokens_generated_total) / (makespan_ms / 1000.0))
+        : 0.0;
+
+    // Completion / reject rates
+    int total = static_cast<int>(reqs.size());
+    double completion_rate = (total > 0) ? static_cast<double>(finished) / total : 0.0;
+    double reject_rate     = (total > 0) ? static_cast<double>(rejected) / total : 0.0;
+
+    // Time-weighted averages from timeseries
+    double avg_vram = 0.0;
+    double busy_ms = 0.0;
+    if (samples.size() >= 2) {
+        double weighted_vram = 0.0;
+        double total_ms = 0.0;
+        for (size_t i = 1; i < samples.size(); ++i) {
+            double dt = samples[i].time_ms - samples[i-1].time_ms;
+            weighted_vram += dt * static_cast<double>(samples[i-1].vram_used);
+            if (samples[i-1].active_prefill + samples[i-1].active_decode > 0) {
+                busy_ms += dt;
+            }
+            total_ms += dt;
+        }
+        if (total_ms > 0.0) {
+            avg_vram = weighted_vram / total_ms;
+        }
+    }
 
     ofs << "{\n"
         << "  \"finished\": " << finished << ",\n"
         << "  \"rejected\": " << rejected << ",\n"
+        << "  \"completion_rate\": " << completion_rate << ",\n"
+        << "  \"reject_rate\": " << reject_rate << ",\n"
+        << "  \"throughput_tokens_per_sec\": " << throughput_tps << ",\n"
         << "  \"p50_latency_ms\": " << p50 << ",\n"
-        << "  \"p95_latency_ms\": " << p95 << "\n"
+        << "  \"p95_latency_ms\": " << p95 << ",\n"
+        << "  \"p99_latency_ms\": " << p99 << ",\n"
+        << "  \"avg_vram_bytes\": " << avg_vram << ",\n"
+        << "  \"gpu_busy_ms\": " << busy_ms << ",\n"
+        << "  \"makespan_ms\": " << makespan_ms << "\n"
         << "}\n";
     return true;
 }

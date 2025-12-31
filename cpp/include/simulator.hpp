@@ -13,6 +13,8 @@ public:
     const std::vector<Request>& requests() const { return requests_; }
     const std::vector<EventRecord>& events() const { return events_; }
     const std::vector<TimeseriesSample>& samples() const { return samples_; }
+    double sim_end_ms() const { return sim_end_ms_; }
+    std::uint64_t tokens_generated_total() const { return tokens_generated_total_; }
 
 private:
     void schedule_arrivals();
@@ -44,6 +46,7 @@ private:
 
     double now_ms_ = 0.0;
     double next_sample_ms_ = 0.0;
+    double sim_end_ms_ = 0.0;
     std::uint64_t vram_used_ = 0;
     int active_prefill_ = 0;
     int active_decode_ = 0;

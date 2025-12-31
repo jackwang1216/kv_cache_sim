@@ -25,6 +25,7 @@ void Simulator::run() {
         if (req.state == RequestState::Rejected) rejected++;
     }
     std::cout << "Finished: " << finished << ", Rejected: " << rejected << '\n';
+    sim_end_ms_ = now_ms_;
 }
 
 void Simulator::schedule_arrivals() {
@@ -186,5 +187,19 @@ void Simulator::sample_until(double target_time_ms) {
         last_tokens_sampled_ = tokens_generated_total_;
         last_rejects_sampled_ = rejects_total_;
         next_sample_ms_ += cfg_.timeseries_dt_ms;
+    }
+    // Ensure we capture the tail interval up to target_time_ms (even if it is not on the sampling grid).
+    if (samples_.empty() || samples_.back().time_ms < target_time_ms) {
+        TimeseriesSample s;
+        s.time_ms = target_time_ms;
+        s.vram_used = vram_used_;
+        s.active_prefill = active_prefill_;
+        s.active_decode = active_decode_;
+        s.queue_depth = static_cast<int>(prefill_queue_.size());
+        s.tokens_generated_delta = tokens_generated_total_ - last_tokens_sampled_;
+        s.rejects_delta = rejects_total_ - last_rejects_sampled_;
+        samples_.push_back(s);
+        last_tokens_sampled_ = tokens_generated_total_;
+        last_rejects_sampled_ = rejects_total_;
     }
 }
