@@ -6,6 +6,21 @@
 
 namespace fs = std::filesystem;
 
+static std::uint64_t fnv1a_file(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) return 0;
+    std::uint64_t hash = 1469598103934665603ull;
+    char buf[4096];
+    while (f.read(buf, sizeof(buf)) || f.gcount()) {
+        std::streamsize n = f.gcount();
+        for (std::streamsize i = 0; i < n; ++i) {
+            hash ^= static_cast<unsigned char>(buf[i]);
+            hash *= 1099511628211ull;
+        }
+    }
+    return hash;
+}
+
 static bool ensure_dir(const std::string& out_dir, std::string& err) {
     std::error_code ec;
     if (fs::exists(out_dir, ec)) {
@@ -164,10 +179,43 @@ bool write_run_meta(const std::string& out_dir, const SimConfig& cfg, std::strin
     if (!ofs.is_open()) { err = "cannot open run_meta"; return false; }
     auto now = std::chrono::system_clock::now().time_since_epoch();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+    // config_path parameter is needed; keep default hashing to 0 if missing
+    // (overload signature includes config_path; adjust signature to accept it)
+    // Placeholder to avoid compile error; real hash computed in overload below.
+    std::uint64_t cfg_hash = 0;
+
     ofs << "{\n"
         << "  \"seed\": " << cfg.seed << ",\n"
         << "  \"timeseries_dt_ms\": " << cfg.timeseries_dt_ms << ",\n"
-        << "  \"timestamp_ms\": " << ms << "\n"
+        << "  \"timestamp_ms\": " << ms << ",\n"
+        << "  \"config_hash\": " << cfg_hash << ",\n"
+        << "  \"scheduling\": \"" << (cfg.policy.scheduling == SchedulingMode::FIFO ? "fifo" : "shortest_remaining") << "\",\n"
+        << "  \"memory_pressure_policy\": \"" << (cfg.policy.memory_pressure_policy == MemoryPressurePolicy::Evict ? "evict" : "reject") << "\",\n"
+        << "  \"eviction_policy\": \"" << (cfg.policy.eviction_policy == EvictionPolicy::LRU ? "lru" : "fifo") << "\",\n"
+        << "  \"decode_sharing_cap\": " << cfg.gpu.decode_sharing_cap << ",\n"
+        << "  \"decode_efficiency\": " << cfg.gpu.decode_efficiency << "\n"
+        << "}\n";
+    return true;
+}
+
+bool write_run_meta(const std::string& out_dir, const SimConfig& cfg, std::string& err, const std::string& config_path) {
+    if (!ensure_dir(out_dir, err)) return false;
+    std::ofstream ofs(out_dir + "/run_meta.json");
+    if (!ofs.is_open()) { err = "cannot open run_meta"; return false; }
+    auto now = std::chrono::system_clock::now().time_since_epoch();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+    std::uint64_t cfg_hash = config_path.empty() ? 0 : fnv1a_file(config_path);
+
+    ofs << "{\n"
+        << "  \"seed\": " << cfg.seed << ",\n"
+        << "  \"timeseries_dt_ms\": " << cfg.timeseries_dt_ms << ",\n"
+        << "  \"timestamp_ms\": " << ms << ",\n"
+        << "  \"config_hash\": " << cfg_hash << ",\n"
+        << "  \"scheduling\": \"" << (cfg.policy.scheduling == SchedulingMode::FIFO ? "fifo" : "shortest_remaining") << "\",\n"
+        << "  \"memory_pressure_policy\": \"" << (cfg.policy.memory_pressure_policy == MemoryPressurePolicy::Evict ? "evict" : "reject") << "\",\n"
+        << "  \"eviction_policy\": \"" << (cfg.policy.eviction_policy == EvictionPolicy::LRU ? "lru" : "fifo") << "\",\n"
+        << "  \"decode_sharing_cap\": " << cfg.gpu.decode_sharing_cap << ",\n"
+        << "  \"decode_efficiency\": " << cfg.gpu.decode_efficiency << "\n"
         << "}\n";
     return true;
 }

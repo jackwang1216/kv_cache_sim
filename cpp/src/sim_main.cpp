@@ -1,15 +1,37 @@
 #include <iostream>
+#include <unordered_map>
 #include "simulator.hpp"
 #include "io_config.hpp"
 #include "io_trace.hpp"
 #include "io_output.hpp"
 
+static std::unordered_map<std::string, std::string> parse_args(int argc, char** argv) {
+    std::unordered_map<std::string, std::string> m;
+    for (int i = 1; i < argc; i++) {
+        std::string a = argv[i];
+        auto eq = a.find('=');
+        if (eq != std::string::npos) {
+            m[a.substr(0, eq)] = a.substr(eq + 1);
+        } else if (i+1 < argc && argv[i+1][0] != '-') {
+            m[a] = argv[i+1];
+            ++i;
+        } else {
+            m[a] = "";
+        }
+    }
+    return m;
+}
+
 int main(int argc, char** argv) {
-    std::string config_path = (argc > 1) ? argv[1] : "";
-    std::string trace_path  = (argc > 2) ? argv[2] : "";
-    std::string out_dir     = (argc > 3) ? argv[3] : "runs/demo";
+    auto args = parse_args(argc, argv);
+    std::string config_path = args.count("--config") ? args["--config"] : (argc > 1 ? argv[1] : "");
+    std::string trace_path  = args.count("--trace")  ? args["--trace"]  : (argc > 2 ? argv[2] : "");
+    std::string out_dir     = args.count("--out")    ? args["--out"]    : (argc > 3 ? argv[3] : "runs/demo");
+    unsigned int seed = 12345;
+    if (args.count("--seed")) seed = static_cast<unsigned int>(std::stoul(args["--seed"]));
 
     SimConfig cfg;
+    cfg.seed = seed;
     std::string err;
 
     if (!config_path.empty()) {
@@ -37,7 +59,7 @@ int main(int argc, char** argv) {
     }
     if (!write_timeseries_csv(out_dir, sim.samples(), err)) std::cerr << "write_timeseries error: " << err << "\n";
     if (!write_events_jsonl(out_dir, sim.events(), err)) std::cerr << "write_events error: " << err << "\n";
-    if (!write_run_meta(out_dir, cfg, err)) std::cerr << "write_run_meta error: " << err << "\n";
+    if (!write_run_meta(out_dir, cfg, err, config_path)) std::cerr << "write_run_meta error: " << err << "\n";
 
     return 0;
 }

@@ -62,6 +62,8 @@ struct GPUConfig {
     int max_concurrent = 16;
     double prefill_tps = 1000.0;
     double decode_tps = 500.0;
+    int decode_sharing_cap = 8;
+    double decode_efficiency = 0.8;
 };
 
 struct PolicyConfig {

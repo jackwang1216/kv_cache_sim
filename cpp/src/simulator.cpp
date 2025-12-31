@@ -67,9 +67,12 @@ double Simulator::prefill_duration_ms(int prompt_tokens) const {
     return 1000.0 * prompt_tokens / cfg_.gpu.prefill_tps;
 }
 
-double Simulator::decode_duration_ms(int gen_tokens, int /*active_decode*/) const {
-    // Later you can divide by active decodes to model sharing/batching.
-    return 1000.0 * gen_tokens / cfg_.gpu.decode_tps;
+double Simulator::decode_duration_ms(int gen_tokens, int active_decode) const {
+    int share = std::max(1, std::min(active_decode, cfg_.gpu.decode_sharing_cap));
+    double eff = cfg_.gpu.decode_efficiency;
+    double effective_tps = cfg_.gpu.decode_tps * eff / static_cast<double>(share);
+    if (effective_tps <= 0.0) return 0.0;
+    return 1000.0 * gen_tokens / effective_tps;
 }
 
 void Simulator::on_arrival(const Event& event) {

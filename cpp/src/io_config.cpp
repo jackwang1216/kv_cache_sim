@@ -48,6 +48,8 @@ bool load_config(const std::string& path, SimConfig& cfg, std::string& err) {
             if (sval == "fifo") cfg.policy.eviction_policy = EvictionPolicy::FIFO;
             else if (sval == "lru") cfg.policy.eviction_policy = EvictionPolicy::LRU;
         }
+        else if (key == "decode_sharing_cap" && (iss >> ival)) cfg.gpu.decode_sharing_cap = ival;
+        else if (key == "decode_efficiency" && (iss >> dval)) cfg.gpu.decode_efficiency = dval;
     }
     return true;
 }
