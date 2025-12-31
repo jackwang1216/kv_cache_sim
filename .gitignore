@@ -23,5 +23,5 @@ reports/
 __pycache__/
 *.pyc
 
-project_overview.pdf
+project_overview.tex
 timeline.md
