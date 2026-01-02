@@ -1,6 +1,9 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <deque>
+#include <list>
+#include <vector>
 #include "events.hpp"
 
 enum class RequestState {
@@ -32,6 +35,7 @@ struct EventRecord {
     double time_ms = 0.0;
     EventType type = EventType::Arrival;
     std::string request_id;
+    int gpu_index = 0;
 };
 
 struct TimeseriesSample {
@@ -58,12 +62,23 @@ struct Request {
 };
 
 struct GPUConfig {
-    std::uint64_t vram_bytes = 24ull * 1024ull * 1024ull * 1024ull; // 24GB
+    std::uint64_t vram_bytes = 24ull * 1024ull * 1024ull * 1024ull;
     int max_concurrent = 16;
     double prefill_tps = 1000.0;
     double decode_tps = 500.0;
     int decode_sharing_cap = 8;
     double decode_efficiency = 0.8;
+};
+
+struct GPUState {
+    std::uint64_t vram_used = 0;
+    int active_prefill = 0;
+    int active_decode = 0;
+    std::deque<int> prefill_queue;
+    std::deque<int> evict_queue;
+    std::list<int> lru_list;
+    std::vector<std::list<int>::iterator> lru_iters;
+    std::vector<std::uint64_t> allocated_bytes;
 };
 
 struct PolicyConfig {
@@ -76,7 +91,7 @@ struct PolicyConfig {
 };
 
 struct SimConfig {
-    GPUConfig gpu;
+    std::vector<GPUConfig> gpus;
     PolicyConfig policy;
     double timeseries_dt_ms = 20.0;
     unsigned int seed = 12345;

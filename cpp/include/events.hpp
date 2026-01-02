@@ -15,7 +15,7 @@ struct Event {
     double time_ms = 0.0;
     EventType type = EventType::Arrival;
     int request_index = -1;
-    int extra = 0;
+    int gpu_index = 0;
 };
 
 struct EventCompare {

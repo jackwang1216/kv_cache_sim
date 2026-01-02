@@ -184,7 +184,8 @@ bool write_events_jsonl(const std::string& out_dir, const std::vector<EventRecor
         ofs << "{"
             << "\"time_ms\":" << e.time_ms << ","
             << "\"type\":\"" << event_type_str(e.type) << "\","
-            << "\"request_id\":\"" << e.request_id << "\""
+            << "\"request_id\":\"" << e.request_id << "\","
+            << "\"gpu_index\":" << e.gpu_index
             << "}\n";
     }
     return true;
@@ -209,8 +210,8 @@ bool write_run_meta(const std::string& out_dir, const SimConfig& cfg, std::strin
         << "  \"scheduling\": \"" << (cfg.policy.scheduling == SchedulingMode::FIFO ? "fifo" : "shortest_remaining") << "\",\n"
         << "  \"memory_pressure_policy\": \"" << (cfg.policy.memory_pressure_policy == MemoryPressurePolicy::Evict ? "evict" : "reject") << "\",\n"
         << "  \"eviction_policy\": \"" << (cfg.policy.eviction_policy == EvictionPolicy::LRU ? "lru" : "fifo") << "\",\n"
-        << "  \"decode_sharing_cap\": " << cfg.gpu.decode_sharing_cap << ",\n"
-        << "  \"decode_efficiency\": " << cfg.gpu.decode_efficiency << "\n"
+        << "  \"decode_sharing_cap\": " << cfg.gpus[0].decode_sharing_cap << ",\n"
+        << "  \"decode_efficiency\": " << cfg.gpus[0].decode_efficiency << "\n"
         << "}\n";
     return true;
 }
@@ -231,8 +232,8 @@ bool write_run_meta(const std::string& out_dir, const SimConfig& cfg, std::strin
         << "  \"scheduling\": \"" << (cfg.policy.scheduling == SchedulingMode::FIFO ? "fifo" : "shortest_remaining") << "\",\n"
         << "  \"memory_pressure_policy\": \"" << (cfg.policy.memory_pressure_policy == MemoryPressurePolicy::Evict ? "evict" : "reject") << "\",\n"
         << "  \"eviction_policy\": \"" << (cfg.policy.eviction_policy == EvictionPolicy::LRU ? "lru" : "fifo") << "\",\n"
-        << "  \"decode_sharing_cap\": " << cfg.gpu.decode_sharing_cap << ",\n"
-        << "  \"decode_efficiency\": " << cfg.gpu.decode_efficiency << "\n"
+        << "  \"decode_sharing_cap\": " << cfg.gpus[0].decode_sharing_cap << ",\n"
+        << "  \"decode_efficiency\": " << cfg.gpus[0].decode_efficiency << "\n"
         << "}\n";
     return true;
 }
