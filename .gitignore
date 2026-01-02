@@ -25,3 +25,5 @@ __pycache__/
 
 project_overview.tex
 timeline.md
+.claude
+Multi_GPU_Design.txt

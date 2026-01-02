@@ -4,6 +4,11 @@
 #include <algorithm>
 
 bool load_config(const std::string& path, SimConfig& cfg, std::string& err) {
+    if (cfg.gpus.empty()) {
+        cfg.gpus.push_back(GPUConfig{});
+    }
+    int num_gpus_requested = static_cast<int>(cfg.gpus.size());
+
     // Stub: if file missing, keep defaults; otherwise parse a simple key=value
     std::ifstream f(path);
     if (!f.is_open()) {
@@ -24,10 +29,11 @@ bool load_config(const std::string& path, SimConfig& cfg, std::string& err) {
             return s;
         };
         std::string sval;
-        if (key == "vram_bytes" && (iss >> uval)) cfg.gpu.vram_bytes = uval;
-        else if (key == "max_concurrent" && (iss >> ival)) cfg.gpu.max_concurrent = ival;
-        else if (key == "prefill_tps" && (iss >> dval)) cfg.gpu.prefill_tps = dval;
-        else if (key == "decode_tps" && (iss >> dval)) cfg.gpu.decode_tps = dval;
+        if (key == "num_gpus" && (iss >> ival) && ival > 0) num_gpus_requested = ival;
+        else if (key == "vram_bytes" && (iss >> uval)) cfg.gpus[0].vram_bytes = uval;
+        else if (key == "max_concurrent" && (iss >> ival)) cfg.gpus[0].max_concurrent = ival;
+        else if (key == "prefill_tps" && (iss >> dval)) cfg.gpus[0].prefill_tps = dval;
+        else if (key == "decode_tps" && (iss >> dval)) cfg.gpus[0].decode_tps = dval;
         else if (key == "kv_bytes_per_token" && (iss >> uval)) cfg.policy.kv_bytes_per_token = uval;
         else if (key == "max_queue" && (iss >> ival)) cfg.policy.max_queue = ival;
         else if (key == "safe_reservation" && (iss >> ival)) cfg.policy.safe_reservation = (ival != 0);
@@ -48,8 +54,14 @@ bool load_config(const std::string& path, SimConfig& cfg, std::string& err) {
             if (sval == "fifo") cfg.policy.eviction_policy = EvictionPolicy::FIFO;
             else if (sval == "lru") cfg.policy.eviction_policy = EvictionPolicy::LRU;
         }
-        else if (key == "decode_sharing_cap" && (iss >> ival)) cfg.gpu.decode_sharing_cap = ival;
-        else if (key == "decode_efficiency" && (iss >> dval)) cfg.gpu.decode_efficiency = dval;
+        else if (key == "decode_sharing_cap" && (iss >> ival)) cfg.gpus[0].decode_sharing_cap = ival;
+        else if (key == "decode_efficiency" && (iss >> dval)) cfg.gpus[0].decode_efficiency = dval;
+    }
+
+    if (num_gpus_requested < 1) num_gpus_requested = 1;
+    if (static_cast<int>(cfg.gpus.size()) != num_gpus_requested) {
+        GPUConfig base = cfg.gpus[0];
+        cfg.gpus.assign(num_gpus_requested, base);
     }
     return true;
 }

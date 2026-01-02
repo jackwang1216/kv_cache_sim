@@ -18,6 +18,7 @@ public:
     std::uint64_t tokens_generated_total() const { return tokens_generated_total_; }
 
 private:
+    int route_gpu_for_request(const Request& req) const;
     void schedule_arrivals();
     void handle_event(const Event& event);
     void on_arrival(const Event& event);
@@ -25,40 +26,33 @@ private:
     void on_start_decode(const Event& event);
     void on_finish(const Event& event);
 
-    void try_start_prefill();
-    int pick_next_from_queue();
-    void record_event(EventType type, const Request& req);
+    void try_start_prefill(int gpu_idx);
+    int pick_next_from_queue(int gpu_idx);
+    void record_event(EventType type, const Request& req, int gpu_idx);
     void sample_until(double time_ms);
 
-    double prefill_duration_ms(int prompt_tokens) const;
-    double decode_duration_ms(int gen_tokens, int active_decode) const;
-    bool can_admit_prompt(int prompt_tokens) const;
-    bool can_reserve_decode(int prompt_tokens, int gen_tokens) const;
-    void allocate_kv_bytes(int req_idx, std::uint64_t bytes);
-    void free_kv_bytes(int req_idx, std::uint64_t bytes);
+    double prefill_duration_ms(int prompt_tokens, int gpu_idx) const;
+    double decode_duration_ms(int gen_tokens, int active_decode, int gpu_idx) const;
+    bool can_admit_prompt(int prompt_tokens, int gpu_idx) const;
+    bool can_reserve_decode(int prompt_tokens, int gen_tokens, int gpu_idx) const;
+    void allocate_kv_bytes(int req_idx, std::uint64_t bytes, int gpu_idx);
+    void free_kv_bytes(int req_idx, std::uint64_t bytes, int gpu_idx);
 
-    bool ensure_capacity_for(std::uint64_t bytes_needed);
-    bool evict_one();
-    void touch_lru(int req_idx);
+    bool ensure_capacity_for(std::uint64_t bytes_needed, int gpu_idx);
+    bool evict_one(int gpu_idx);
+    void touch_lru(int req_idx, int gpu_idx);
 
 private:
     SimConfig cfg_;
     std::vector<Request> requests_;
+    std::vector<GPUState> gpus_;
     std::priority_queue<Event, std::vector<Event>, EventCompare> pq_;
-    std::deque<int> prefill_queue_;
-    std::deque<int> evict_queue_;
-    std::list<int> lru_list_;
-    std::vector<std::list<int>::iterator> lru_iters_;
-    std::vector<std::uint64_t> allocated_bytes_;
     std::vector<EventRecord> events_;
     std::vector<TimeseriesSample> samples_;
 
     double now_ms_ = 0.0;
     double next_sample_ms_ = 0.0;
     double sim_end_ms_ = 0.0;
-    std::uint64_t vram_used_ = 0;
-    int active_prefill_ = 0;
-    int active_decode_ = 0;
 
     std::uint64_t tokens_generated_total_ = 0;
     int rejects_total_ = 0;
