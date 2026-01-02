@@ -65,6 +65,9 @@ struct Request {
     double start_prefill_ms = 0.0;
     double start_decode_ms = 0.0;
     double finish_ms = 0.0;
+
+    int prefill_gpu = 0;
+    int decode_gpu = 0;
 };
 
 struct GPUConfig {
@@ -91,6 +94,8 @@ struct PolicyConfig {
     bool safe_reservation = true; 
     int max_queue = 1024;
     std::uint64_t kv_bytes_per_token = 2048;
+    double handoff_latency_us = 10.0;       // Fixed latency overhead in microseconds
+    double handoff_bandwidth_gbps = 300.0;  // NVLink ~300 GB/s, PCIe 4.0 ~25 GB/s
     SchedulingMode scheduling = SchedulingMode::FIFO;
     MemoryPressurePolicy memory_pressure_policy = MemoryPressurePolicy::Reject;
     EvictionPolicy eviction_policy = EvictionPolicy::FIFO;

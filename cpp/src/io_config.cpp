@@ -44,6 +44,12 @@ bool load_config(const std::string& path, SimConfig& cfg, std::string& err) {
             else if (sval == "shortest" || sval == "srt" || sval == "shortest_remaining")
                 cfg.policy.scheduling = SchedulingMode::ShortestRemaining;
         }
+        else if (key == "handoff_latency_us" && (iss >> dval)) {
+            cfg.policy.handoff_latency_us = dval;
+        }
+        else if (key == "handoff_bandwidth_gbps" && (iss >> dval)) {
+            cfg.policy.handoff_bandwidth_gbps = dval;
+        }
         else if (key == "routing_policy" && (iss >> sval)) {
             sval = to_lower(sval);
             if (sval == "p2c" || sval == "power2choices" || sval == "power_of_two_choices") {

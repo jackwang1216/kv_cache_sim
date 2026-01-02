@@ -169,6 +169,8 @@ static std::string event_type_str(EventType t) {
         case EventType::Enqueue: return "enqueue";
         case EventType::StartPrefill: return "start_prefill";
         case EventType::StartDecode: return "start_decode";
+        case EventType::HandoffStart: return "handoff_start";
+        case EventType::HandoffComplete: return "handoff_complete";
         case EventType::Finish: return "finish";
         case EventType::Reject: return "reject";
         case EventType::Evict: return "evict";

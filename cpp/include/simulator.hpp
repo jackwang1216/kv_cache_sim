@@ -44,6 +44,10 @@ private:
 
     double score_gpu(int gpu_idx) const;
 
+    int route_decode(int prefill_gpu, const Request& req);
+    void on_handoff_start(const Event& event);
+    void on_handoff_complete(const Event& event);
+
 private:
     SimConfig cfg_;
     std::vector<Request> requests_;

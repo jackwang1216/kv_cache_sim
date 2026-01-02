@@ -85,6 +85,29 @@ int Simulator::route_gpu_for_request(const Request& req) {
     return 0;
 }
 
+int Simulator::route_decode(int prefill_gpu, const Request& req) {
+    (void)req;
+    int n = static_cast<int>(gpus_.size());
+    if (n == 1) return prefill_gpu;
+
+    auto sample_idx = [n, this]() {
+        int idx = static_cast<int>(rng_.uniform01() * n);
+        return (idx >= n) ? n - 1 : idx;
+    };
+    int a = sample_idx();
+    int b = sample_idx();
+    if (n > 2) {
+        while (b == a) b = sample_idx();
+    } else if (a == b) {
+        b = 1 - a;
+    }
+    double score_a = score_gpu(a);
+    double score_b = score_gpu(b);
+    if (score_a < score_b) return a;
+    if (score_b < score_a) return b;
+    return (rng_.uniform01() < 0.5) ? a : b;
+}
+
 void Simulator::schedule_arrivals() {
     for (int i = 0; i < static_cast<int>(requests_.size()); ++i) {
         pq_.push(Event{requests_[i].arrival_time_ms, EventType::Arrival, i, -1});
@@ -93,10 +116,12 @@ void Simulator::schedule_arrivals() {
 
 void Simulator::handle_event(const Event& event) {
     switch (event.type) {
-        case EventType::Arrival:      on_arrival(event); break;
-        case EventType::StartPrefill: on_start_prefill(event); break;
-        case EventType::StartDecode:  on_start_decode(event); break;
-        case EventType::Finish:       on_finish(event); break;
+        case EventType::Arrival:        on_arrival(event); break;
+        case EventType::StartPrefill:   on_start_prefill(event); break;
+        case EventType::StartDecode:    on_start_decode(event); break;
+        case EventType::HandoffStart:   on_handoff_start(event); break;
+        case EventType::HandoffComplete: on_handoff_complete(event); break;
+        case EventType::Finish:         on_finish(event); break;
         default: break;
     }
 }
@@ -179,6 +204,7 @@ void Simulator::on_arrival(const Event& event) {
     touch_lru(event.request_index, gpu_idx);
 
     if (gpu.active_prefill + gpu.active_decode < cfg_.gpus[gpu_idx].max_concurrent) {
+        gpu.active_prefill++;  // Increment now to prevent concurrent arrivals from over-scheduling
         pq_.push(Event{now_ms_, EventType::StartPrefill, event.request_index, gpu_idx});
     } else {
         gpu.prefill_queue.push_back(event.request_index);
@@ -213,6 +239,7 @@ void Simulator::try_start_prefill(int gpu_idx) {
     while (!gpu.prefill_queue.empty() && gpu.active_prefill + gpu.active_decode < cfg_.gpus[gpu_idx].max_concurrent) {
         int req_idx = pick_next_from_queue(gpu_idx);
         if (req_idx < 0) break;
+        gpu.active_prefill++;  // Increment now to prevent over-scheduling
         pq_.push(Event{now_ms_, EventType::StartPrefill, req_idx, gpu_idx});
     }
 }
@@ -222,11 +249,13 @@ void Simulator::on_start_prefill(const Event& event) {
     auto& gpu = gpus_[gpu_idx];
     auto& req = requests_[event.request_index];
     if (req.state == RequestState::Evicted || req.state == RequestState::Rejected || req.state == RequestState::Finished) {
+        gpu.active_prefill--;
+        try_start_prefill(gpu_idx);
         return;
     }
     req.state = RequestState::Prefill;
     req.start_prefill_ms = now_ms_;
-    gpu.active_prefill++;
+    req.prefill_gpu = gpu_idx;
     touch_lru(event.request_index, gpu_idx);
     record_event(EventType::StartPrefill, req, gpu_idx);
     double duration = prefill_duration_ms(req.prompt_tokens, gpu_idx);
@@ -241,6 +270,14 @@ void Simulator::on_start_decode(const Event& event) {
         return;
     }
     gpu.active_prefill--;
+    int decode_gpu_idx = route_decode(gpu_idx, req);
+    req.decode_gpu = decode_gpu_idx;
+    if (decode_gpu_idx != gpu_idx) {
+        // Schedule handoff to different GPU; convert latency from us to ms
+        pq_.push(Event{now_ms_ + cfg_.policy.handoff_latency_us / 1000.0, EventType::HandoffStart, event.request_index, decode_gpu_idx});
+        try_start_prefill(gpu_idx);
+        return;
+    }
     req.state = RequestState::Decode;
     req.start_decode_ms = now_ms_;
     gpu.active_decode++;
@@ -262,6 +299,68 @@ void Simulator::on_start_decode(const Event& event) {
     record_event(EventType::StartDecode, req, gpu_idx);
     double duration = decode_duration_ms(req.gen_tokens, gpu.active_decode, gpu_idx);
     pq_.push(Event{now_ms_ + duration, EventType::Finish, event.request_index, gpu_idx});
+}
+
+void Simulator::on_handoff_start(const Event& event) {
+    int dest_gpu_idx = event.gpu_index;
+    auto& req = requests_[event.request_index];
+    int src_gpu_idx = req.prefill_gpu;
+    auto& src_gpu = gpus_[src_gpu_idx];
+
+    std::uint64_t bytes_to_copy = src_gpu.allocated_bytes[event.request_index];
+
+    if (!ensure_capacity_for(bytes_to_copy, dest_gpu_idx)) {
+        req.state = RequestState::Rejected;
+        rejects_total_++;
+        record_event(EventType::Reject, req, dest_gpu_idx);
+        free_kv_bytes(event.request_index, bytes_to_copy, src_gpu_idx);
+        return;
+    }
+
+    allocate_kv_bytes(event.request_index, bytes_to_copy, dest_gpu_idx);
+    double bandwidth_bytes_per_ms = cfg_.policy.handoff_bandwidth_gbps * 1e6;
+    double transfer_ms = static_cast<double>(bytes_to_copy) / bandwidth_bytes_per_ms;
+    record_event(EventType::HandoffStart, req, dest_gpu_idx);
+    pq_.push(Event{now_ms_ + transfer_ms, EventType::HandoffComplete, event.request_index, dest_gpu_idx});
+}
+
+void Simulator::on_handoff_complete(const Event& event) {
+    int dest_gpu_idx = event.gpu_index;
+    int req_idx = event.request_index;
+    auto& req = requests_[req_idx];
+    if (req.state == RequestState::Evicted || req.state == RequestState::Rejected || req.state == RequestState::Finished) {
+        return;
+    }
+    int src_gpu_idx = req.prefill_gpu;
+    auto& src_gpu = gpus_[src_gpu_idx];
+    auto& dest_gpu = gpus_[dest_gpu_idx];
+
+    // Free KV from source GPU (handoff complete)
+    free_kv_bytes(req_idx, src_gpu.allocated_bytes[req_idx], src_gpu_idx);
+    record_event(EventType::HandoffComplete, req, dest_gpu_idx);
+
+    // If safe_reservation=false, need to allocate decode bytes on dest GPU
+    if (!cfg_.policy.safe_reservation) {
+        std::uint64_t need = static_cast<std::uint64_t>(req.gen_tokens) * cfg_.policy.kv_bytes_per_token;
+        if (!ensure_capacity_for(need, dest_gpu_idx)) {
+            req.state = RequestState::Rejected;
+            rejects_total_++;
+            record_event(EventType::Reject, req, dest_gpu_idx);
+            free_kv_bytes(req_idx, dest_gpu.allocated_bytes[req_idx], dest_gpu_idx);
+            return;
+        }
+        allocate_kv_bytes(req_idx, need, dest_gpu_idx);
+    }
+
+    // Directly transition to decode on destination GPU (don't re-enter routing)
+    req.state = RequestState::Decode;
+    req.start_decode_ms = now_ms_;
+    dest_gpu.active_decode++;
+
+    touch_lru(req_idx, dest_gpu_idx);
+    record_event(EventType::StartDecode, req, dest_gpu_idx);
+    double duration = decode_duration_ms(req.gen_tokens, dest_gpu.active_decode, dest_gpu_idx);
+    pq_.push(Event{now_ms_ + duration, EventType::Finish, req_idx, dest_gpu_idx});
 }
 
 void Simulator::on_finish(const Event& event) {

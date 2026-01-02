@@ -6,6 +6,8 @@ enum class EventType {
     Enqueue,
     StartPrefill,
     StartDecode,
+    HandoffStart, 
+    HandoffComplete,
     Finish,
     Reject,
     Evict
