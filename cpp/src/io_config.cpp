@@ -44,6 +44,16 @@ bool load_config(const std::string& path, SimConfig& cfg, std::string& err) {
             else if (sval == "shortest" || sval == "srt" || sval == "shortest_remaining")
                 cfg.policy.scheduling = SchedulingMode::ShortestRemaining;
         }
+        else if (key == "routing_policy" && (iss >> sval)) {
+            sval = to_lower(sval);
+            if (sval == "p2c" || sval == "power2choices" || sval == "power_of_two_choices") {
+                cfg.policy.routing_policy = RoutingPolicy::P2C;
+            } else if (sval == "roundrobin" || sval == "rr") {
+                cfg.policy.routing_policy = RoutingPolicy::RoundRobin;
+            } else if (sval == "leastloaded" || sval == "least" || sval == "ll") {
+                cfg.policy.routing_policy = RoutingPolicy::LeastLoaded;
+            }
+        }
         else if (key == "memory_pressure_policy" && (iss >> sval)) {
             sval = to_lower(sval);
             if (sval == "reject") cfg.policy.memory_pressure_policy = MemoryPressurePolicy::Reject;

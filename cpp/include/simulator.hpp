@@ -18,7 +18,7 @@ public:
     std::uint64_t tokens_generated_total() const { return tokens_generated_total_; }
 
 private:
-    int route_gpu_for_request(const Request& req) const;
+    int route_gpu_for_request(const Request& req);
     void schedule_arrivals();
     void handle_event(const Event& event);
     void on_arrival(const Event& event);
@@ -42,6 +42,8 @@ private:
     bool evict_one(int gpu_idx);
     void touch_lru(int req_idx, int gpu_idx);
 
+    double score_gpu(int gpu_idx) const;
+
 private:
     SimConfig cfg_;
     std::vector<Request> requests_;
@@ -58,4 +60,6 @@ private:
     int rejects_total_ = 0;
     std::uint64_t last_tokens_sampled_ = 0;
     int last_rejects_sampled_ = 0;
+
+    RNG rng_;
 };

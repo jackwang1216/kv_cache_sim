@@ -31,6 +31,12 @@ enum class EvictionPolicy {
     LRU
 };
 
+enum class RoutingPolicy {
+    P2C,
+    RoundRobin,
+    LeastLoaded
+};
+
 struct EventRecord {
     double time_ms = 0.0;
     EventType type = EventType::Arrival;
@@ -88,6 +94,7 @@ struct PolicyConfig {
     SchedulingMode scheduling = SchedulingMode::FIFO;
     MemoryPressurePolicy memory_pressure_policy = MemoryPressurePolicy::Reject;
     EvictionPolicy eviction_policy = EvictionPolicy::FIFO;
+    RoutingPolicy routing_policy = RoutingPolicy::P2C;
 };
 
 struct SimConfig {

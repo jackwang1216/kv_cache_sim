@@ -1,11 +1,13 @@
 #include <iostream>
 #include <algorithm>
+#include <random>
 #include "simulator.hpp"
 
 Simulator::Simulator(SimConfig cfg, std::vector<Request> requests)
     : cfg_(std::move(cfg)),
       requests_(std::move(requests)),
-      next_sample_ms_(cfg.timeseries_dt_ms) {
+      next_sample_ms_(cfg_.timeseries_dt_ms),
+      rng_(cfg_.seed) {
         if (cfg_.gpus.size() == 0){
             cfg_.gpus.push_back(GPUConfig{});
         }
@@ -46,16 +48,46 @@ void Simulator::run() {
     sim_end_ms_ = now_ms_;
 }
 
-//temporary function 
-int Simulator::route_gpu_for_request(const Request& req) const {
+//simple score function for now
+double Simulator::score_gpu(int gpu_idx) const {
+    auto& gpu = gpus_[gpu_idx];
+    return gpu.active_prefill + gpu.active_decode + static_cast<double>(gpu.prefill_queue.size());
+}
+
+int Simulator::route_gpu_for_request(const Request& req) {
     (void)req;
+    int n = static_cast<int>(gpus_.size());
+    if (n == 1) return 0;
+
+    if (cfg_.policy.routing_policy == RoutingPolicy::P2C) {
+        auto sample_idx = [n, this]() {
+            int idx = static_cast<int>(rng_.uniform01() * n);
+            return (idx >= n) ? n - 1 : idx;
+        };
+        int a = sample_idx();
+        int b = sample_idx();
+        if (n > 2) {
+            while (b == a) b = sample_idx();
+        } else if (a == b) {
+            b = 1 - a;
+        }
+        double score_a = score_gpu(a);
+        double score_b = score_gpu(b);
+        if (score_a < score_b) return a;
+        if (score_b < score_a) return b;
+        // Tie: pick randomly to avoid bias
+        return (rng_.uniform01() < 0.5) ? a : b;
+    } else if (cfg_.policy.routing_policy == RoutingPolicy::RoundRobin) {
+        return 0;  // TODO: implement round-robin
+    } else if (cfg_.policy.routing_policy == RoutingPolicy::LeastLoaded) {
+        return 0;  // TODO: implement least-loaded
+    }
     return 0;
 }
 
 void Simulator::schedule_arrivals() {
     for (int i = 0; i < static_cast<int>(requests_.size()); ++i) {
-        int gpu_idx = route_gpu_for_request(requests_[i]);
-        pq_.push(Event{requests_[i].arrival_time_ms, EventType::Arrival, i, gpu_idx});
+        pq_.push(Event{requests_[i].arrival_time_ms, EventType::Arrival, i, -1});
     }
 }
 
@@ -113,12 +145,13 @@ double Simulator::decode_duration_ms(int gen_tokens, int active_decode, int gpu_
 }
 
 void Simulator::on_arrival(const Event& event) {
-    int gpu_idx = event.gpu_index;
-    auto& gpu = gpus_[gpu_idx];
     auto& req = requests_[event.request_index];
     if (req.state == RequestState::Evicted || req.state == RequestState::Rejected || req.state == RequestState::Finished) {
         return;
     }
+    // Route at arrival time (when actual GPU state is known)
+    int gpu_idx = route_gpu_for_request(req);
+    auto& gpu = gpus_[gpu_idx];
     int queued = static_cast<int>(gpu.prefill_queue.size());
     int active = gpu.active_prefill + gpu.active_decode;
     if (queued + active >= cfg_.policy.max_queue) {
