@@ -96,7 +96,10 @@ void Simulator::precompute_topology() {
 //simple score function for now
 double Simulator::score_gpu(int gpu_idx) const {
     auto& gpu = gpus_[gpu_idx];
-    return gpu.active_prefill + gpu.active_decode + static_cast<double>(gpu.prefill_queue.size());
+    auto& gpu_cfg = cfg_.gpus[gpu_idx];
+    double raw_load = gpu.active_prefill + gpu.active_decode + static_cast<double>(gpu.prefill_queue.size());
+    double speed_factor = 1000.0 / gpu_cfg.prefill_tps;
+    return raw_load * speed_factor;
 }
 
 int Simulator::route_gpu_for_request(const Request& req) {
@@ -175,7 +178,16 @@ double Simulator::estimate_handoff_ms(int src_idx, int dest_idx, const Request& 
 }
 
 double Simulator::compute_decode_score(int src_idx, int dest_idx, const Request& req) const {
-    return score_gpu(dest_idx) + cfg_.policy.handoff_cost_weight * estimate_handoff_ms(src_idx, dest_idx, req);
+    const auto& gpu = gpus_[dest_idx];
+    const auto& gpu_cfg = cfg_.gpus[dest_idx];
+
+    double raw_load = gpu.active_prefill + gpu.active_decode + static_cast<double>(gpu.prefill_queue.size());
+    double decode_speed_factor = 500.0 / gpu_cfg.decode_tps;
+    double load_score = raw_load * decode_speed_factor;
+
+    double handoff_cost = cfg_.policy.handoff_cost_weight * estimate_handoff_ms(src_idx, dest_idx, req);
+
+    return load_score + handoff_cost;
 }
 
 void Simulator::schedule_arrivals() {

@@ -101,6 +101,10 @@ struct PolicyConfig {
     MemoryPressurePolicy memory_pressure_policy = MemoryPressurePolicy::Reject;
     EvictionPolicy eviction_policy = EvictionPolicy::FIFO;
     RoutingPolicy routing_policy = RoutingPolicy::P2C;
+
+    std::uint64_t vram_bytes = 24ull * 1024ull * 1024ull * 1024ull;
+    double prefill_tps = 1000.0;
+    double decode_tps = 500.0;
 };
 
 struct RawLink {

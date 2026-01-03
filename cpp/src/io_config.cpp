@@ -83,12 +83,42 @@ bool load_config(const std::string& path, SimConfig& cfg, std::string& err) {
         }
         else if (key == "decode_sharing_cap" && (iss >> ival)) cfg.gpus[0].decode_sharing_cap = ival;
         else if (key == "decode_efficiency" && (iss >> dval)) cfg.gpus[0].decode_efficiency = dval;
+        else if (key == "gpu") {
+            // Format: gpu <id> [vram <bytes>] [prefill_tps <val>] [decode_tps <val>]
+            int gpu_id = -1;
+            if (!(iss >> gpu_id) || gpu_id < 0) continue;
+            
+            // Ensure gpus vector is large enough
+            if (gpu_id >= static_cast<int>(cfg.gpus.size())) {
+                cfg.gpus.resize(gpu_id + 1, cfg.gpus.empty() ? GPUConfig{} : cfg.gpus[0]);
+            }
+            if (gpu_id >= num_gpus_requested) num_gpus_requested = gpu_id + 1;
+            
+            // Parse key-value pairs for this GPU
+            std::string subkey;
+            while (iss >> subkey) {
+                subkey = to_lower(subkey);
+                if (subkey == "vram" && (iss >> uval)) {
+                    cfg.gpus[gpu_id].vram_bytes = uval;
+                } else if (subkey == "prefill_tps" && (iss >> dval)) {
+                    cfg.gpus[gpu_id].prefill_tps = dval;
+                } else if (subkey == "decode_tps" && (iss >> dval)) {
+                    cfg.gpus[gpu_id].decode_tps = dval;
+                } 
+            }
+        }
     }
 
     if (num_gpus_requested < 1) num_gpus_requested = 1;
-    if (static_cast<int>(cfg.gpus.size()) != num_gpus_requested) {
-        GPUConfig base = cfg.gpus[0];
-        cfg.gpus.assign(num_gpus_requested, base);
+    // Expand (not replace) gpus vector to reach num_gpus_requested
+    // This preserves any per-GPU custom settings already parsed
+    GPUConfig base = cfg.gpus.empty() ? GPUConfig{} : cfg.gpus[0];
+    while (static_cast<int>(cfg.gpus.size()) < num_gpus_requested) {
+        cfg.gpus.push_back(base);
+    }
+    // Shrink if needed (rare case where explicit gpu IDs < num_gpus)
+    if (static_cast<int>(cfg.gpus.size()) > num_gpus_requested) {
+        cfg.gpus.resize(num_gpus_requested);
     }
     return true;
 }
