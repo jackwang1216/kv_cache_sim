@@ -91,19 +91,30 @@ struct GPUState {
 };
 
 struct PolicyConfig {
-    bool safe_reservation = true; 
+    bool safe_reservation = true;
     int max_queue = 1024;
     std::uint64_t kv_bytes_per_token = 2048;
     double handoff_latency_us = 10.0;       // Fixed latency overhead in microseconds
-    double handoff_bandwidth_gbps = 300.0;  // NVLink ~300 GB/s, PCIe 4.0 ~25 GB/s
+    double handoff_bandwidth_gbps = 300.0;  // Default NVLink ~300 GB/s, PCIe 4.0 ~25 GB/s
+    double handoff_cost_weight = 0.5;
     SchedulingMode scheduling = SchedulingMode::FIFO;
     MemoryPressurePolicy memory_pressure_policy = MemoryPressurePolicy::Reject;
     EvictionPolicy eviction_policy = EvictionPolicy::FIFO;
     RoutingPolicy routing_policy = RoutingPolicy::P2C;
 };
 
+struct RawLink {
+    int src = 0;
+    int dest = 0;
+    double bandwidth_gbps = 0.0;
+    double latency_ms = 0.0;
+};
+
 struct SimConfig {
     std::vector<GPUConfig> gpus;
+    std::vector<std::vector<double>> latency_matrix;
+    std::vector<std::vector<double>> bandwidth_matrix;
+    std::vector<RawLink> raw_links;
     PolicyConfig policy;
     double timeseries_dt_ms = 20.0;
     unsigned int seed = 12345;

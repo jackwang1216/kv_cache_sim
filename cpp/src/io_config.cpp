@@ -50,6 +50,9 @@ bool load_config(const std::string& path, SimConfig& cfg, std::string& err) {
         else if (key == "handoff_bandwidth_gbps" && (iss >> dval)) {
             cfg.policy.handoff_bandwidth_gbps = dval;
         }
+        else if (key == "handoff_cost_weight" && (iss >> dval)) {
+            cfg.policy.handoff_cost_weight = dval;
+        }
         else if (key == "routing_policy" && (iss >> sval)) {
             sval = to_lower(sval);
             if (sval == "p2c" || sval == "power2choices" || sval == "power_of_two_choices") {
@@ -58,6 +61,14 @@ bool load_config(const std::string& path, SimConfig& cfg, std::string& err) {
                 cfg.policy.routing_policy = RoutingPolicy::RoundRobin;
             } else if (sval == "leastloaded" || sval == "least" || sval == "ll") {
                 cfg.policy.routing_policy = RoutingPolicy::LeastLoaded;
+            }
+        }
+        else if (key == "link") {
+            // Expected format: link <src> <dest> <bandwidth_gbps> <latency_ms>
+            int src = -1, dest = -1;
+            double bw = 0.0, lat = 0.0;
+            if (iss >> src >> dest >> bw >> lat) {
+                cfg.raw_links.push_back(RawLink{src, dest, bw, lat});
             }
         }
         else if (key == "memory_pressure_policy" && (iss >> sval)) {

@@ -1,6 +1,7 @@
 #include <iostream>
 #include <algorithm>
 #include <random>
+#include <limits>
 #include "simulator.hpp"
 
 Simulator::Simulator(SimConfig cfg, std::vector<Request> requests)
@@ -12,6 +13,7 @@ Simulator::Simulator(SimConfig cfg, std::vector<Request> requests)
             cfg_.gpus.push_back(GPUConfig{});
         }
         gpus_.resize(cfg_.gpus.size());
+        precompute_topology();
         for (auto& gpu : gpus_) {
             gpu.vram_used = 0;
             gpu.active_prefill = 0;
@@ -46,6 +48,49 @@ void Simulator::run() {
               << ", Rejected: " << rejected
               << ", Evicted: " << evicted << '\n';
     sim_end_ms_ = now_ms_;
+}
+
+void Simulator::precompute_topology() {
+    int num_gpus = static_cast<int>(gpus_.size());
+    const double INF = std::numeric_limits<double>::infinity();
+    double default_bw = cfg_.policy.handoff_bandwidth_gbps;
+    double default_lat = cfg_.policy.handoff_latency_us / 1000.0;  // Convert to ms
+
+    // Initialize matrices: diagonal = same GPU, off-diagonal = default link
+    cfg_.bandwidth_matrix.assign(num_gpus, std::vector<double>(num_gpus, default_bw));
+    cfg_.latency_matrix.assign(num_gpus, std::vector<double>(num_gpus, default_lat));
+    for (int i = 0; i < num_gpus; i++) {
+        cfg_.latency_matrix[i][i] = 0.0;
+        cfg_.bandwidth_matrix[i][i] = INF; 
+    }
+
+    // Apply explicit link definitions (override defaults)
+    for (const auto& link : cfg_.raw_links) {
+        int src = link.src;
+        int dest = link.dest;
+        if (src < 0 || dest < 0 || src >= num_gpus || dest >= num_gpus) continue;
+        // Take better values (lower latency, higher bandwidth)
+        cfg_.latency_matrix[src][dest] = std::min(cfg_.latency_matrix[src][dest], link.latency_ms);
+        cfg_.latency_matrix[dest][src] = std::min(cfg_.latency_matrix[dest][src], link.latency_ms);
+        cfg_.bandwidth_matrix[src][dest] = std::max(cfg_.bandwidth_matrix[src][dest], link.bandwidth_gbps);
+        cfg_.bandwidth_matrix[dest][src] = std::max(cfg_.bandwidth_matrix[dest][src], link.bandwidth_gbps);
+    }
+
+    // Floyd-Warshall
+    for (int k = 0; k < num_gpus; k++) {
+        for (int i = 0; i < num_gpus; i++) {
+            if (cfg_.bandwidth_matrix[i][k] == 0 || cfg_.bandwidth_matrix[i][k] == INF) continue;
+            for (int j = 0; j < num_gpus; j++) {
+                if (cfg_.bandwidth_matrix[k][j] == 0 || cfg_.bandwidth_matrix[k][j] == INF) continue;
+                double hop_latency = cfg_.latency_matrix[i][k] + cfg_.latency_matrix[k][j];
+                double hop_bandwidth = 1.0 / (1.0 / cfg_.bandwidth_matrix[i][k] + 1.0 / cfg_.bandwidth_matrix[k][j]);
+                if (hop_bandwidth > cfg_.bandwidth_matrix[i][j]) {
+                    cfg_.bandwidth_matrix[i][j] = hop_bandwidth;
+                    cfg_.latency_matrix[i][j] = hop_latency;
+                }
+            }
+        }
+    }
 }
 
 //simple score function for now
@@ -86,26 +131,51 @@ int Simulator::route_gpu_for_request(const Request& req) {
 }
 
 int Simulator::route_decode(int prefill_gpu, const Request& req) {
-    (void)req;
     int n = static_cast<int>(gpus_.size());
     if (n == 1) return prefill_gpu;
 
-    auto sample_idx = [n, this]() {
-        int idx = static_cast<int>(rng_.uniform01() * n);
-        return (idx >= n) ? n - 1 : idx;
-    };
-    int a = sample_idx();
-    int b = sample_idx();
-    if (n > 2) {
-        while (b == a) b = sample_idx();
-    } else if (a == b) {
-        b = 1 - a;
+    double best_score = std::numeric_limits<double>::infinity();
+    int best_gpu = -1;
+    for (int gpu_idx = 0; gpu_idx < n; ++gpu_idx) {
+        if (!can_fit_kv(gpu_idx, req)) continue;
+        double score = compute_decode_score(prefill_gpu, gpu_idx, req);
+        if (score < best_score) {
+            best_score = score;
+            best_gpu = gpu_idx;
+        }
     }
-    double score_a = score_gpu(a);
-    double score_b = score_gpu(b);
-    if (score_a < score_b) return a;
-    if (score_b < score_a) return b;
-    return (rng_.uniform01() < 0.5) ? a : b;
+    if (best_gpu == -1) return prefill_gpu;
+    return best_gpu;
+}
+
+bool Simulator::can_fit_kv(int gpu_idx, const Request& req) const {
+    const auto& gpu = gpus_[gpu_idx];
+    const auto& gpu_cfg = cfg_.gpus[gpu_idx];
+    std::uint64_t need = static_cast<std::uint64_t>(req.prompt_tokens + req.gen_tokens) * cfg_.policy.kv_bytes_per_token;
+    return gpu.vram_used + need <= gpu_cfg.vram_bytes;
+}
+
+double Simulator::get_link_bandwidth(int src_idx, int dest_idx) const {
+    if (src_idx == dest_idx) return std::numeric_limits<double>::infinity();
+    return cfg_.bandwidth_matrix[src_idx][dest_idx];
+}
+
+double Simulator::get_link_latency(int src_idx, int dest_idx) const {
+    if (src_idx == dest_idx) return 0.0;
+    return cfg_.latency_matrix[src_idx][dest_idx];
+}
+
+double Simulator::estimate_handoff_ms(int src_idx, int dest_idx, const Request& req) const {
+    if (src_idx == dest_idx) return 0.0;
+    double bandwidth_gbps = get_link_bandwidth(src_idx, dest_idx);
+    double latency_ms = get_link_latency(src_idx, dest_idx);
+    double bytes = static_cast<double>(req.prompt_tokens + req.gen_tokens) * cfg_.policy.kv_bytes_per_token;
+    double transfer_ms = bytes / (bandwidth_gbps * 1e6);
+    return latency_ms + transfer_ms;
+}
+
+double Simulator::compute_decode_score(int src_idx, int dest_idx, const Request& req) const {
+    return score_gpu(dest_idx) + cfg_.policy.handoff_cost_weight * estimate_handoff_ms(src_idx, dest_idx, req);
 }
 
 void Simulator::schedule_arrivals() {
@@ -318,8 +388,7 @@ void Simulator::on_handoff_start(const Event& event) {
     }
 
     allocate_kv_bytes(event.request_index, bytes_to_copy, dest_gpu_idx);
-    double bandwidth_bytes_per_ms = cfg_.policy.handoff_bandwidth_gbps * 1e6;
-    double transfer_ms = static_cast<double>(bytes_to_copy) / bandwidth_bytes_per_ms;
+    double transfer_ms = estimate_handoff_ms(src_gpu_idx, dest_gpu_idx, req);
     record_event(EventType::HandoffStart, req, dest_gpu_idx);
     pq_.push(Event{now_ms_ + transfer_ms, EventType::HandoffComplete, event.request_index, dest_gpu_idx});
 }

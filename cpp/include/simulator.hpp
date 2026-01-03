@@ -48,6 +48,13 @@ private:
     void on_handoff_start(const Event& event);
     void on_handoff_complete(const Event& event);
 
+    void precompute_topology();
+    bool can_fit_kv(int gpu_idx, const Request& req) const;
+    double get_link_bandwidth(int src_gpu_idx, int dest_gpu_idx) const;
+    double get_link_latency(int src_gpu_idx, int dest_gpu_idx) const;
+    double estimate_handoff_ms(int src_gpu_idx, int dest_gpu_idx, const Request& req) const;
+    double compute_decode_score(int src_gpu_idx, int dest_gpu_idx, const Request& req) const;
+
 private:
     SimConfig cfg_;
     std::vector<Request> requests_;
