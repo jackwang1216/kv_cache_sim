@@ -54,10 +54,21 @@ int main(int argc, char** argv) {
     Simulator sim(cfg, std::move(reqs));
     sim.run();
 
-    if (!write_summary(out_dir, sim.requests(), sim.samples(), sim.tokens_generated_total(), sim.sim_end_ms(), sim.events(), cfg, err)){
+    // Phase 8: Populate extended metrics from simulator
+    ExtendedMetrics ext_metrics;
+    ext_metrics.retry_attempts = sim.retry_attempts();
+    ext_metrics.retry_successes = sim.retry_successes();
+    ext_metrics.handoffs_total = sim.handoffs_total();
+    ext_metrics.cross_gpu_decodes = sim.cross_gpu_decodes();
+    ext_metrics.max_global_queue_depth = sim.max_global_queue_depth();
+    ext_metrics.peak_vram_per_gpu = sim.peak_vram_per_gpu();
+    ext_metrics.tokens_per_gpu = sim.tokens_per_gpu();
+    ext_metrics.requests_finished_per_gpu = sim.requests_finished_per_gpu();
+
+    if (!write_summary(out_dir, sim.requests(), sim.samples(), sim.tokens_generated_total(), sim.sim_end_ms(), sim.events(), cfg, ext_metrics, err)){
         std::cerr << "write_summary error: " << err << "\n";
     }
-    if (!write_timeseries_csv(out_dir, sim.samples(), err)) std::cerr << "write_timeseries error: " << err << "\n";
+    if (!write_timeseries_csv(out_dir, sim.samples(), sim.num_gpus(), err)) std::cerr << "write_timeseries error: " << err << "\n";
     if (!write_events_jsonl(out_dir, sim.events(), err)) std::cerr << "write_events error: " << err << "\n";
     if (!write_run_meta(out_dir, cfg, err, config_path)) std::cerr << "write_run_meta error: " << err << "\n";
 

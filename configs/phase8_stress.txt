@@ -1,0 +1,40 @@
+# Phase 8 stress test config - exercises all metrics
+# 2 heterogeneous GPUs to force handoffs and cross-GPU decodes
+
+num_gpus 2
+
+# Memory config
+kv_bytes_per_token 100
+safe_reservation 0
+
+# Queue & scheduling
+max_queue 4
+max_retries 3
+scheduling fifo
+
+# Memory pressure
+memory_pressure_policy evict
+eviction_policy lru
+
+# Handoff settings
+handoff_bandwidth_gbps 100
+handoff_latency_us 50
+
+# Sampling
+timeseries_dt_ms 10
+
+# Per-GPU config: GPU 0 is faster with more VRAM
+gpu 0 vram_bytes 600000
+gpu 0 max_concurrent 3
+gpu 0 prefill_tps 1200
+gpu 0 decode_tps 600
+gpu 0 decode_sharing_cap 8
+gpu 0 decode_efficiency 0.8
+
+# Per-GPU config: GPU 1 is slower with less VRAM
+gpu 1 vram_bytes 400000
+gpu 1 max_concurrent 3
+gpu 1 prefill_tps 800
+gpu 1 decode_tps 400
+gpu 1 decode_sharing_cap 8
+gpu 1 decode_efficiency 0.8

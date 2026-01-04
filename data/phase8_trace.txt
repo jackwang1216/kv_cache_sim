@@ -1,0 +1,25 @@
+# Phase 8 stress test trace - 20 requests with varied sizes
+# Format: id arrival_ms prompt_tokens gen_tokens streaming
+# Burst at start to fill queues and trigger global queue
+r01 0 500 200 0
+r02 0 400 150 0
+r03 0 600 250 0
+r04 0 300 100 0
+r05 5 450 180 0
+r06 5 350 120 0
+r07 10 500 200 0
+r08 10 400 160 0
+# Second wave
+r09 100 300 100 0
+r10 100 550 220 0
+r11 150 400 150 0
+r12 150 350 130 0
+r13 200 450 170 0
+r14 200 500 200 0
+# Third wave - larger requests
+r15 400 600 300 0
+r16 400 700 350 0
+r17 500 550 250 0
+r18 500 500 200 0
+r19 600 400 150 0
+r20 600 450 180 0

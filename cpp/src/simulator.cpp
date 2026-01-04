@@ -24,6 +24,11 @@ Simulator::Simulator(SimConfig cfg, std::vector<Request> requests)
             gpu.allocated_bytes.assign(requests_.size(), 0);
             gpu.lru_iters.assign(requests_.size(), gpu.lru_list.end());
         }
+        // Phase 8: Initialize per-GPU tracking vectors
+        int num_gpus = static_cast<int>(gpus_.size());
+        peak_vram_per_gpu_.assign(num_gpus, 0);
+        tokens_per_gpu_.assign(num_gpus, 0);
+        requests_finished_per_gpu_.assign(num_gpus, 0);
       }
 
 void Simulator::run() {
@@ -226,6 +231,10 @@ void Simulator::allocate_kv_bytes(int req_idx, std::uint64_t bytes, int gpu_idx)
     auto& gpu = gpus_[gpu_idx];
     gpu.vram_used += bytes;
     gpu.allocated_bytes[req_idx] += bytes;
+    // Phase 8: Track peak VRAM per GPU
+    if (gpu.vram_used > peak_vram_per_gpu_[gpu_idx]) {
+        peak_vram_per_gpu_[gpu_idx] = gpu.vram_used;
+    }
 }
 
 void Simulator::free_kv_bytes(int req_idx, std::uint64_t bytes, int gpu_idx) {
@@ -283,6 +292,11 @@ void Simulator::on_arrival(const Event& event) {
     // If still can't accept, push to global queue
     if (!can_accept) {
         global_queue_.push_back(event.request_index);
+        // Phase 8: Track max global queue depth
+        int current_depth = static_cast<int>(global_queue_.size());
+        if (current_depth > max_global_queue_depth_) {
+            max_global_queue_depth_ = current_depth;
+        }
         return;
     }
 
@@ -326,6 +340,12 @@ int Simulator::find_alternate_gpu(int exclude_gpu, const Request& req) const {
 }
 
 void Simulator::try_dispatch_global_queue() {
+    // Phase 8: Track max global queue depth
+    int current_depth = static_cast<int>(global_queue_.size());
+    if (current_depth > max_global_queue_depth_) {
+        max_global_queue_depth_ = current_depth;
+    }
+
     while (!global_queue_.empty()){
         int req_idx = global_queue_.front();
         auto& req = requests_[req_idx];
@@ -446,9 +466,11 @@ void Simulator::on_start_decode(const Event& event) {
         std::uint64_t need = static_cast<std::uint64_t>(req.gen_tokens) * cfg_.policy.kv_bytes_per_token;
         if (!ensure_capacity_for(need, gpu_idx)) {
             req.retry_count++;
+            retry_attempts_++;  // Phase 8: Track retry attempt
             if (req.retry_count < cfg_.policy.max_admission_retries) {
                 int alt_gpu = find_alternate_gpu(gpu_idx, req);
                 if (alt_gpu != -1) {
+                    retry_successes_++;  // Phase 8: Track successful retry
                     gpu.active_decode--;
                     pq_.push(Event{now_ms_, EventType::HandoffStart, event.request_index, alt_gpu});
                     return;
@@ -480,9 +502,11 @@ void Simulator::on_handoff_start(const Event& event) {
 
     if (!ensure_capacity_for(bytes_to_copy, dest_gpu_idx)) {
         req.retry_count++;
+        retry_attempts_++;  // Phase 8: Track retry attempt
         if (req.retry_count < cfg_.policy.max_admission_retries) {
             int alt_gpu = find_alternate_gpu(src_gpu_idx, req);
             if (alt_gpu != -1 && alt_gpu != dest_gpu_idx) {
+                retry_successes_++;  // Phase 8: Track successful retry
                 pq_.push(Event{now_ms_, EventType::HandoffStart, event.request_index, alt_gpu});
                 return;
             }
@@ -494,6 +518,7 @@ void Simulator::on_handoff_start(const Event& event) {
         return;
     }
 
+    handoffs_total_++;  // Phase 8: Track successful handoff
     allocate_kv_bytes(event.request_index, bytes_to_copy, dest_gpu_idx);
     double transfer_ms = estimate_handoff_ms(src_gpu_idx, dest_gpu_idx, req);
     record_event(EventType::HandoffStart, req, dest_gpu_idx);
@@ -550,6 +575,14 @@ void Simulator::on_finish(const Event& event) {
     req.state = RequestState::Finished;
     req.finish_ms = now_ms_;
     tokens_generated_total_ += static_cast<std::uint64_t>(req.gen_tokens);
+
+    // Phase 8: Track per-GPU and cross-GPU metrics
+    tokens_per_gpu_[gpu_idx] += static_cast<std::uint64_t>(req.gen_tokens);
+    requests_finished_per_gpu_[gpu_idx]++;
+    if (req.prefill_gpu != req.decode_gpu) {
+        cross_gpu_decodes_++;
+    }
+
     record_event(EventType::Finish, req, gpu_idx);
     free_kv_bytes(event.request_index, gpu.allocated_bytes[event.request_index], gpu_idx);
 
@@ -582,7 +615,9 @@ void Simulator::sample_until(double target_time_ms) {
             s.active_prefill += gpu.active_prefill;
             s.active_decode += gpu.active_decode;
             s.queue_depth += static_cast<int>(gpu.prefill_queue.size());
+            s.vram_per_gpu.push_back(gpu.vram_used);  // Phase 8: Per-GPU VRAM
         }
+        s.global_queue_depth = static_cast<int>(global_queue_.size());  // Phase 8: Global queue
         s.tokens_generated_delta = tokens_generated_total_ - last_tokens_sampled_;
         s.rejects_delta = rejects_total_ - last_rejects_sampled_;
         samples_.push_back(s);
@@ -599,7 +634,9 @@ void Simulator::sample_until(double target_time_ms) {
             s.active_prefill += gpu.active_prefill;
             s.active_decode += gpu.active_decode;
             s.queue_depth += static_cast<int>(gpu.prefill_queue.size());
+            s.vram_per_gpu.push_back(gpu.vram_used);  // Phase 8: Per-GPU VRAM
         }
+        s.global_queue_depth = static_cast<int>(global_queue_.size());  // Phase 8: Global queue
         s.tokens_generated_delta = tokens_generated_total_ - last_tokens_sampled_;
         s.rejects_delta = rejects_total_ - last_rejects_sampled_;
         samples_.push_back(s);

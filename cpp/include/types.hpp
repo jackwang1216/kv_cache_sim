@@ -52,6 +52,9 @@ struct TimeseriesSample {
     int queue_depth = 0;
     std::uint64_t tokens_generated_delta = 0;
     int rejects_delta = 0;
+    // Phase 8: Per-GPU and global queue metrics
+    std::vector<std::uint64_t> vram_per_gpu;
+    int global_queue_depth = 0;
 };
 
 struct Request {

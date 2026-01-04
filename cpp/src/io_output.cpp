@@ -43,6 +43,7 @@ bool write_summary(const std::string& out_dir,
                    double sim_end_ms,
                    const std::vector<EventRecord>& events,
                    const SimConfig& cfg,
+                   const ExtendedMetrics& ext_metrics,
                    std::string& err) {
     if (!ensure_dir(out_dir, err)) return false;
     std::ofstream ofs(out_dir + "/summary.json");
@@ -141,24 +142,59 @@ bool write_summary(const std::string& out_dir,
         << "  \"makespan_ms\": " << makespan_ms << ",\n"
         << "  \"memory_pressure_policy\": \"" << policy_to_str(cfg.policy.memory_pressure_policy) << "\",\n";
     if (cfg.policy.memory_pressure_policy == MemoryPressurePolicy::Evict) {
-        ofs << "  \"eviction_policy\": \"" << evict_policy_to_str(cfg.policy.eviction_policy) << "\",\n"
-            << "  \"evictions\": " << evict_count << "\n";
-    } else {
-        ofs << "  \"evictions\": " << evict_count << "\n";
+        ofs << "  \"eviction_policy\": \"" << evict_policy_to_str(cfg.policy.eviction_policy) << "\",\n";
     }
+    ofs << "  \"evictions\": " << evict_count << ",\n";
+
+    // Phase 8: Extended metrics
+    ofs << "  \"retry_attempts\": " << ext_metrics.retry_attempts << ",\n"
+        << "  \"retry_successes\": " << ext_metrics.retry_successes << ",\n"
+        << "  \"handoffs_total\": " << ext_metrics.handoffs_total << ",\n"
+        << "  \"cross_gpu_decodes\": " << ext_metrics.cross_gpu_decodes << ",\n"
+        << "  \"max_global_queue_depth\": " << ext_metrics.max_global_queue_depth << ",\n";
+
+    // Per-GPU metrics array
+    ofs << "  \"per_gpu\": [\n";
+    for (size_t i = 0; i < ext_metrics.peak_vram_per_gpu.size(); ++i) {
+        ofs << "    {\"gpu_index\": " << i
+            << ", \"peak_vram_bytes\": " << ext_metrics.peak_vram_per_gpu[i]
+            << ", \"tokens_generated\": " << ext_metrics.tokens_per_gpu[i]
+            << ", \"requests_finished\": " << ext_metrics.requests_finished_per_gpu[i] << "}";
+        if (i + 1 < ext_metrics.peak_vram_per_gpu.size()) ofs << ",";
+        ofs << "\n";
+    }
+    ofs << "  ]\n";
+
     ofs << "}\n";
     return true;
 }
 
-bool write_timeseries_csv(const std::string& out_dir, const std::vector<TimeseriesSample>& samples, std::string& err) {
+bool write_timeseries_csv(const std::string& out_dir, const std::vector<TimeseriesSample>& samples, int num_gpus, std::string& err) {
     if (!ensure_dir(out_dir, err)) return false;
     std::ofstream ofs(out_dir + "/timeseries.csv");
     if (!ofs.is_open()) { err = "cannot open timeseries"; return false; }
-    ofs << "time_ms,vram_used,active_prefill,active_decode,queue_depth,tokens_generated_delta,rejects_delta\n";
+
+    // Header: original columns + per-GPU VRAM + global queue depth
+    ofs << "time_ms,vram_used,active_prefill,active_decode,queue_depth,tokens_generated_delta,rejects_delta";
+    for (int i = 0; i < num_gpus; ++i) {
+        ofs << ",vram_gpu" << i;
+    }
+    ofs << ",global_queue_depth\n";
+
+    // Data rows
     for (const auto& s : samples) {
         ofs << s.time_ms << "," << s.vram_used << "," << s.active_prefill << ","
             << s.active_decode << "," << s.queue_depth << ","
-            << s.tokens_generated_delta << "," << s.rejects_delta << "\n";
+            << s.tokens_generated_delta << "," << s.rejects_delta;
+        // Per-GPU VRAM columns
+        for (int i = 0; i < num_gpus; ++i) {
+            if (i < static_cast<int>(s.vram_per_gpu.size())) {
+                ofs << "," << s.vram_per_gpu[i];
+            } else {
+                ofs << ",0";
+            }
+        }
+        ofs << "," << s.global_queue_depth << "\n";
     }
     return true;
 }

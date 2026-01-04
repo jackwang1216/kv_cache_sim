@@ -17,6 +17,17 @@ public:
     double sim_end_ms() const { return sim_end_ms_; }
     std::uint64_t tokens_generated_total() const { return tokens_generated_total_; }
 
+    // Phase 8: Extended metrics getters
+    int retry_attempts() const { return retry_attempts_; }
+    int retry_successes() const { return retry_successes_; }
+    int handoffs_total() const { return handoffs_total_; }
+    int cross_gpu_decodes() const { return cross_gpu_decodes_; }
+    int max_global_queue_depth() const { return max_global_queue_depth_; }
+    const std::vector<std::uint64_t>& peak_vram_per_gpu() const { return peak_vram_per_gpu_; }
+    const std::vector<std::uint64_t>& tokens_per_gpu() const { return tokens_per_gpu_; }
+    const std::vector<int>& requests_finished_per_gpu() const { return requests_finished_per_gpu_; }
+    int num_gpus() const { return static_cast<int>(gpus_.size()); }
+
 private:
     int route_gpu_for_request(const Request& req);
     void schedule_arrivals();
@@ -75,6 +86,16 @@ private:
     int rejects_total_ = 0;
     std::uint64_t last_tokens_sampled_ = 0;
     int last_rejects_sampled_ = 0;
+
+    // Phase 8: Extended metrics counters
+    int retry_attempts_ = 0;
+    int retry_successes_ = 0;
+    int handoffs_total_ = 0;
+    int cross_gpu_decodes_ = 0;
+    int max_global_queue_depth_ = 0;
+    std::vector<std::uint64_t> peak_vram_per_gpu_;
+    std::vector<std::uint64_t> tokens_per_gpu_;
+    std::vector<int> requests_finished_per_gpu_;
 
     RNG rng_;
 };

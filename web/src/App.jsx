@@ -51,20 +51,45 @@ req2 50 150 300 0
 req3 100 180 320 0`);
   const [seed, setSeed] = useState('');
   const [configOpts, setConfigOpts] = useState({
+    // GPU config (defaults for all GPUs)
+    num_gpus: '1',
     vram_bytes: '4294967296',
-    max_concurrent: '2',
+    max_concurrent: '4',
     prefill_tps: '1200',
     decode_tps: '600',
+    // Memory config
     kv_bytes_per_token: '2048',
     safe_reservation: '1',
+    // Queue & scheduling
     max_queue: '64',
-    timeseries_dt_ms: '20',
+    max_retries: '2',
     scheduling: 'fifo',
-    memory_pressure_policy: 'evict',
+    // Memory pressure
+    memory_pressure_policy: 'reject',
     eviction_policy: 'lru',
+    // Decode batching
     decode_sharing_cap: '8',
     decode_efficiency: '0.8',
+    // Handoff (multi-GPU)
+    handoff_bandwidth_gbps: '300',
+    handoff_latency_us: '10',
+    // Sampling
+    timeseries_dt_ms: '20',
   });
+
+  // Per-GPU overrides (only used when num_gpus > 1)
+  const [perGpuConfig, setPerGpuConfig] = useState([]);
+
+  // Update per-GPU config array when num_gpus changes
+  const numGpus = parseInt(configOpts.num_gpus) || 1;
+  const updatePerGpuConfig = (index, field, value) => {
+    setPerGpuConfig((prev) => {
+      const updated = [...prev];
+      if (!updated[index]) updated[index] = {};
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
+  };
 
   const handleRunSim = async () => {
     setError('');
@@ -76,8 +101,21 @@ req3 100 180 320 0`);
         config_options: {},
       };
       // Include only non-empty config fields
+      const perGpuFields = ['vram_bytes', 'prefill_tps', 'decode_tps', 'max_concurrent', 'decode_sharing_cap', 'decode_efficiency'];
       Object.entries(configOpts).forEach(([k, v]) => {
-        if (v !== '') body.config_options[k] = v;
+        if (v === '') return;
+        // Skip per-GPU fields from global config when using multi-GPU
+        if (numGpus > 1 && perGpuFields.includes(k)) return;
+        body.config_options[k] = v;
+      });
+      // Include per-GPU overrides (format: "gpu 0 vram_bytes 600000")
+      perGpuConfig.forEach((gpuConf, idx) => {
+        if (!gpuConf) return;
+        Object.entries(gpuConf).forEach(([field, value]) => {
+          if (value !== '') {
+            body.config_options[`gpu ${idx} ${field}`] = value;
+          }
+        });
       });
       const resp = await fetch(`${BACKEND_BASE}/run`, {
         method: 'POST',
@@ -102,16 +140,28 @@ req3 100 180 320 0`);
   };
 
   const derived = useMemo(() => {
-    if (!timeseries.length) return { t: [], vram: [], queue: [], tps: [] };
+    if (!timeseries.length) return { t: [], vram: [], queue: [], tps: [], globalQueue: [], vramPerGpu: [] };
     const t = timeseries.map((r) => r.time_ms);
     const vram = timeseries.map((r) => r.vram_used);
     const queue = timeseries.map((r) => r.queue_depth);
+    const globalQueue = timeseries.map((r) => r.global_queue_depth ?? 0);
     const tps = timeseries.map((r, i) => {
       if (i === 0) return 0;
       const dt = (r.time_ms - timeseries[i - 1].time_ms) / 1000.0;
       return dt > 0 ? r.tokens_generated_delta / dt : 0;
     });
-    return { t, vram, queue, tps };
+    // Extract per-GPU VRAM columns (vram_gpu0, vram_gpu1, etc.)
+    const vramPerGpu = [];
+    const firstRow = timeseries[0];
+    for (let i = 0; ; i++) {
+      const key = `vram_gpu${i}`;
+      if (!(key in firstRow)) break;
+      vramPerGpu.push({
+        name: `GPU ${i}`,
+        y: timeseries.map((r) => r[key] ?? 0),
+      });
+    }
+    return { t, vram, queue, tps, globalQueue, vramPerGpu };
   }, [timeseries]);
 
   const kpis = summary
@@ -126,6 +176,11 @@ req3 100 180 320 0`);
         ['Reject rate', summary.reject_rate ?? '–'],
         ['Evictions', summary.evictions ?? '–'],
         ['Policy', summary.memory_pressure_policy ?? '–'],
+        // Phase 8: Extended metrics
+        ['Handoffs', summary.handoffs_total ?? '–'],
+        ['Cross-GPU decodes', summary.cross_gpu_decodes ?? '–'],
+        ['Retry success', summary.retry_attempts > 0 ? `${summary.retry_successes}/${summary.retry_attempts}` : '–'],
+        ['Max global queue', summary.max_global_queue_depth ?? '–'],
       ]
     : [];
 
@@ -163,7 +218,14 @@ req3 100 180 320 0`);
             </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mt-3">
-            {Object.entries(configOpts).map(([k, v]) => (
+            {Object.entries(configOpts)
+              .filter(([k]) => {
+                // Hide per-GPU fields from global config when num_gpus > 1
+                const perGpuFields = ['vram_bytes', 'prefill_tps', 'decode_tps', 'max_concurrent', 'decode_sharing_cap', 'decode_efficiency'];
+                if (numGpus > 1 && perGpuFields.includes(k)) return false;
+                return true;
+              })
+              .map(([k, v]) => (
               <div key={k}>
                 <label className="block text-slate-400 mb-1">{k}</label>
                 <input
@@ -174,6 +236,36 @@ req3 100 180 320 0`);
               </div>
             ))}
           </div>
+
+          {/* Per-GPU configuration (shown when num_gpus > 1) */}
+          {numGpus > 1 && (
+            <div className="mt-4 border-t border-slate-700 pt-4">
+              <div className="text-sm font-semibold text-slate-200 mb-2">
+                Per-GPU Overrides <span className="text-slate-500 font-normal">(leave empty to use defaults above)</span>
+              </div>
+              <div className="space-y-3">
+                {Array.from({ length: numGpus }, (_, idx) => (
+                  <div key={idx} className="rounded bg-slate-800 p-3">
+                    <div className="text-xs font-semibold text-emerald-400 mb-2">GPU {idx}</div>
+                    <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-sm">
+                      {['vram_bytes', 'prefill_tps', 'decode_tps', 'max_concurrent', 'decode_sharing_cap', 'decode_efficiency'].map((field) => (
+                        <div key={field}>
+                          <label className="block text-slate-500 text-xs mb-1">{field}</label>
+                          <input
+                            className="w-full rounded bg-slate-700 border border-slate-600 px-2 py-1 text-xs"
+                            placeholder={configOpts[field] || '–'}
+                            value={perGpuConfig[idx]?.[field] || ''}
+                            onChange={(e) => updatePerGpuConfig(idx, field, e.target.value)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="mt-3">
             <button
               onClick={handleRunSim}
@@ -200,18 +292,56 @@ req3 100 180 320 0`);
               ))}
             </div>
 
+            {/* Per-GPU summary table */}
+            {summary.per_gpu && summary.per_gpu.length > 1 && (
+              <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                <div className="text-sm font-semibold text-slate-200 mb-2">Per-GPU Breakdown</div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-slate-400 border-b border-slate-700">
+                      <th className="text-left py-2">GPU</th>
+                      <th className="text-right py-2">Requests</th>
+                      <th className="text-right py-2">Tokens</th>
+                      <th className="text-right py-2">Peak VRAM</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.per_gpu.map((gpu) => (
+                      <tr key={gpu.gpu_index} className="border-b border-slate-800">
+                        <td className="py-2">GPU {gpu.gpu_index}</td>
+                        <td className="text-right py-2">{gpu.requests_finished}</td>
+                        <td className="text-right py-2">{gpu.tokens_generated}</td>
+                        <td className="text-right py-2">{(gpu.peak_vram_bytes / 1e6).toFixed(1)} MB</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <PlotCard
-                title="VRAM over time"
+                title="VRAM over time (total)"
                 x={derived.t}
                 yTitle="bytes"
-                traces={[{ name: 'VRAM', y: derived.vram }]}
+                traces={[{ name: 'Total VRAM', y: derived.vram }]}
               />
+              {derived.vramPerGpu.length > 1 && (
+                <PlotCard
+                  title="VRAM per GPU"
+                  x={derived.t}
+                  yTitle="bytes"
+                  traces={derived.vramPerGpu}
+                />
+              )}
               <PlotCard
                 title="Queue depth over time"
                 x={derived.t}
                 yTitle="depth"
-                traces={[{ name: 'Queue', y: derived.queue }]}
+                traces={[
+                  { name: 'Per-GPU queues', y: derived.queue },
+                  { name: 'Global queue', y: derived.globalQueue },
+                ]}
               />
               <PlotCard
                 title="Tokens/sec over time"
