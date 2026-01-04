@@ -177,7 +177,7 @@ score = load × (500 / decode_tps) + weight × handoff_time
 | `makespan_ms` | Total simulation duration |
 | `evictions` | Requests evicted under memory pressure |
 
-### Multi-GPU Metrics (Phase 8)
+### Multi-GPU Metrics
 
 | Metric | Description |
 |--------|-------------|
