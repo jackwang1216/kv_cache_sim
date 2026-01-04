@@ -261,35 +261,107 @@ void Simulator::on_arrival(const Event& event) {
     auto& gpu = gpus_[gpu_idx];
     int queued = static_cast<int>(gpu.prefill_queue.size());
     int active = gpu.active_prefill + gpu.active_decode;
-    if (queued + active >= cfg_.policy.max_queue) {
-        req.state = RequestState::Rejected;
-        rejects_total_++;
-        record_event(EventType::Reject, req, gpu_idx);
+
+    // Check primary GPU
+    bool can_accept = queued + active < cfg_.policy.max_queue;
+    int reserved_tokens = req.prompt_tokens + (cfg_.policy.safe_reservation ? req.gen_tokens : 0);
+    std::uint64_t need = static_cast<std::uint64_t>(reserved_tokens) * cfg_.policy.kv_bytes_per_token;
+
+    if (can_accept) {
+        can_accept = ensure_capacity_for(need, gpu_idx);
+    }
+
+    // If primary can't accept, try alternate GPU
+    if (!can_accept) {
+        int alternate_gpu = find_alternate_gpu(gpu_idx, req);
+        if (alternate_gpu != -1) {
+            gpu_idx = alternate_gpu;
+            can_accept = ensure_capacity_for(need, gpu_idx);
+        }
+    }
+
+    // If still can't accept, push to global queue
+    if (!can_accept) {
+        global_queue_.push_back(event.request_index);
         return;
     }
 
-    // Reserve KV: prompt always; decode tokens only if safe_reservation is enabled.
-    int reserved_tokens = req.prompt_tokens + (cfg_.policy.safe_reservation ? req.gen_tokens : 0);
-    std::uint64_t need = static_cast<std::uint64_t>(reserved_tokens) * cfg_.policy.kv_bytes_per_token;
-    if (!ensure_capacity_for(need, gpu_idx)) {
-        req.state = RequestState::Rejected;
-        rejects_total_++;
-        record_event(EventType::Reject, req, gpu_idx);
-        return;
-    }
+    auto& target_gpu = gpus_[gpu_idx];
     allocate_kv_bytes(event.request_index, need, gpu_idx);
     req.state = RequestState::Queued;
     record_event(EventType::Arrival, req, gpu_idx);
 
-    // Track for eviction policies
-    gpu.evict_queue.push_back(event.request_index);
+    target_gpu.evict_queue.push_back(event.request_index);
     touch_lru(event.request_index, gpu_idx);
 
-    if (gpu.active_prefill + gpu.active_decode < cfg_.gpus[gpu_idx].max_concurrent) {
-        gpu.active_prefill++;  // Increment now to prevent concurrent arrivals from over-scheduling
+    if (target_gpu.active_prefill + target_gpu.active_decode < cfg_.gpus[gpu_idx].max_concurrent) {
+        target_gpu.active_prefill++;
         pq_.push(Event{now_ms_, EventType::StartPrefill, event.request_index, gpu_idx});
     } else {
-        gpu.prefill_queue.push_back(event.request_index);
+        target_gpu.prefill_queue.push_back(event.request_index);
+    }
+}
+
+int Simulator::find_alternate_gpu(int exclude_gpu, const Request& req) const {
+    int n = static_cast<int>(gpus_.size());
+    int best_gpu = -1;
+    double best_score = std::numeric_limits<double>::infinity();
+    for (int i = 0; i < n; ++i) {
+        if (i == exclude_gpu) continue;
+        auto& gpu = gpus_[i];
+        int queued = static_cast<int>(gpu.prefill_queue.size());
+        int active = gpu.active_prefill + gpu.active_decode;
+
+        if (queued + active >= cfg_.policy.max_queue) continue;
+        int reserved_tokens = req.prompt_tokens + (cfg_.policy.safe_reservation ? req.gen_tokens : 0);
+        std::uint64_t need = static_cast<std::uint64_t>(reserved_tokens) * cfg_.policy.kv_bytes_per_token;
+        if(gpu.vram_used + need > cfg_.gpus[i].vram_bytes && cfg_.policy.memory_pressure_policy == MemoryPressurePolicy::Reject) continue;
+        double score = score_gpu(i);
+        if (score < best_score) {
+            best_score = score;
+            best_gpu = i;
+        }
+    }
+    return best_gpu;
+}
+
+void Simulator::try_dispatch_global_queue() {
+    while (!global_queue_.empty()){
+        int req_idx = global_queue_.front();
+        auto& req = requests_[req_idx];
+
+        if (req.state == RequestState::Evicted || req.state == RequestState::Rejected || req.state == RequestState::Finished) {
+            global_queue_.pop_front();
+            continue;
+        }
+
+        int gpu_idx = find_alternate_gpu(-1, req); 
+        // no alternate GPU found, break
+        if (gpu_idx == -1){
+            break;
+        }
+        global_queue_.pop_front();
+        auto& gpu = gpus_[gpu_idx];
+        int reserved_tokens = req.prompt_tokens + (cfg_.policy.safe_reservation ? req.gen_tokens : 0);
+        std::uint64_t need = static_cast<std::uint64_t>(reserved_tokens) * cfg_.policy.kv_bytes_per_token;
+        
+        if(!ensure_capacity_for(need, gpu_idx)) {
+            global_queue_.push_front(req_idx);
+            break;
+        }
+
+        allocate_kv_bytes(req_idx, need, gpu_idx);
+        req.state = RequestState::Queued;
+        record_event(EventType::Arrival, req, gpu_idx);
+        gpu.evict_queue.push_back(req_idx);
+        touch_lru(req_idx, gpu_idx);
+
+        if (gpu.active_prefill + gpu.active_decode < cfg_.gpus[gpu_idx].max_concurrent) {
+            gpu.active_prefill++;
+            pq_.push(Event{now_ms_, EventType::StartPrefill, req_idx, gpu_idx});
+        } else {
+            gpu.prefill_queue.push_back(req_idx);
+        }
     }
 }
 
@@ -351,13 +423,19 @@ void Simulator::on_start_decode(const Event& event) {
     if (req.state == RequestState::Evicted || req.state == RequestState::Rejected || req.state == RequestState::Finished) {
         return;
     }
-    gpu.active_prefill--;
+
+    bool is_first_decode_attempt = (req.state == RequestState::Prefill && gpu_idx == req.prefill_gpu);
+    if (is_first_decode_attempt) {
+        gpu.active_prefill--;
+    }
+
     int decode_gpu_idx = route_decode(gpu_idx, req);
     req.decode_gpu = decode_gpu_idx;
     if (decode_gpu_idx != gpu_idx) {
-        // Schedule handoff to different GPU; convert latency from us to ms
         pq_.push(Event{now_ms_ + cfg_.policy.handoff_latency_us / 1000.0, EventType::HandoffStart, event.request_index, decode_gpu_idx});
-        try_start_prefill(gpu_idx);
+        if (is_first_decode_attempt) {
+            try_start_prefill(gpu_idx);
+        }
         return;
     }
     req.state = RequestState::Decode;
@@ -367,6 +445,15 @@ void Simulator::on_start_decode(const Event& event) {
     if (!cfg_.policy.safe_reservation) {
         std::uint64_t need = static_cast<std::uint64_t>(req.gen_tokens) * cfg_.policy.kv_bytes_per_token;
         if (!ensure_capacity_for(need, gpu_idx)) {
+            req.retry_count++;
+            if (req.retry_count < cfg_.policy.max_admission_retries) {
+                int alt_gpu = find_alternate_gpu(gpu_idx, req);
+                if (alt_gpu != -1) {
+                    gpu.active_decode--;
+                    pq_.push(Event{now_ms_, EventType::HandoffStart, event.request_index, alt_gpu});
+                    return;
+                }
+            }
             req.state = RequestState::Rejected;
             rejects_total_++;
             gpu.active_decode--;
@@ -392,9 +479,17 @@ void Simulator::on_handoff_start(const Event& event) {
     std::uint64_t bytes_to_copy = src_gpu.allocated_bytes[event.request_index];
 
     if (!ensure_capacity_for(bytes_to_copy, dest_gpu_idx)) {
+        req.retry_count++;
+        if (req.retry_count < cfg_.policy.max_admission_retries) {
+            int alt_gpu = find_alternate_gpu(src_gpu_idx, req);
+            if (alt_gpu != -1 && alt_gpu != dest_gpu_idx) {
+                pq_.push(Event{now_ms_, EventType::HandoffStart, event.request_index, alt_gpu});
+                return;
+            }
+        }
         req.state = RequestState::Rejected;
         rejects_total_++;
-        record_event(EventType::Reject, req, dest_gpu_idx);
+        record_event(EventType::Reject, req, src_gpu_idx);
         free_kv_bytes(event.request_index, bytes_to_copy, src_gpu_idx);
         return;
     }
@@ -465,13 +560,13 @@ void Simulator::on_finish(const Event& event) {
             gpu.lru_iters[event.request_index] = gpu.lru_list.end();
         }
     }
-    // For FIFO, skip stale victims during eviction; optional eager cleanup:
-    // remove all occurrences of this index
+    // For FIFO, skip stale victims during eviction
     gpu.evict_queue.erase(
         std::remove(gpu.evict_queue.begin(), gpu.evict_queue.end(), event.request_index),
         gpu.evict_queue.end());
 
     try_start_prefill(gpu_idx);
+    try_dispatch_global_queue();
 }
 
 void Simulator::record_event(EventType type, const Request& req, int gpu_idx) {

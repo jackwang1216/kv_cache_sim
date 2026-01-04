@@ -68,6 +68,8 @@ struct Request {
 
     int prefill_gpu = 0;
     int decode_gpu = 0;
+
+    int retry_count = 0;
 };
 
 struct GPUConfig {
@@ -94,6 +96,7 @@ struct PolicyConfig {
     bool safe_reservation = true;
     int max_queue = 1024;
     std::uint64_t kv_bytes_per_token = 2048;
+    int max_admission_retries = 2;
     double handoff_latency_us = 10.0;       // Fixed latency overhead in microseconds
     double handoff_bandwidth_gbps = 300.0;  // Default NVLink ~300 GB/s, PCIe 4.0 ~25 GB/s
     double handoff_cost_weight = 0.5;

@@ -36,6 +36,7 @@ bool load_config(const std::string& path, SimConfig& cfg, std::string& err) {
         else if (key == "decode_tps" && (iss >> dval)) cfg.gpus[0].decode_tps = dval;
         else if (key == "kv_bytes_per_token" && (iss >> uval)) cfg.policy.kv_bytes_per_token = uval;
         else if (key == "max_queue" && (iss >> ival)) cfg.policy.max_queue = ival;
+        else if (key == "max_retries" && (iss >> ival)) cfg.policy.max_admission_retries = ival;
         else if (key == "safe_reservation" && (iss >> ival)) cfg.policy.safe_reservation = (ival != 0);
         else if (key == "timeseries_dt_ms" && (iss >> dval)) cfg.timeseries_dt_ms = dval;
         else if (key == "scheduling" && (iss >> sval)) {

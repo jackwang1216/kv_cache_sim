@@ -55,6 +55,9 @@ private:
     double estimate_handoff_ms(int src_gpu_idx, int dest_gpu_idx, const Request& req) const;
     double compute_decode_score(int src_gpu_idx, int dest_gpu_idx, const Request& req) const;
 
+    void try_dispatch_global_queue();
+    int find_alternate_gpu(int exclude_gpu, const Request& req) const;
+
 private:
     SimConfig cfg_;
     std::vector<Request> requests_;
@@ -62,6 +65,7 @@ private:
     std::priority_queue<Event, std::vector<Event>, EventCompare> pq_;
     std::vector<EventRecord> events_;
     std::vector<TimeseriesSample> samples_;
+    std::deque<int> global_queue_;
 
     double now_ms_ = 0.0;
     double next_sample_ms_ = 0.0;
