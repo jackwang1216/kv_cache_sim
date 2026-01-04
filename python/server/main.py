@@ -17,12 +17,12 @@ RUNS_ROOT = ROOT / "runs" / "api"
 
 
 class RunRequest(BaseModel):
-    trace_path: Optional[str] = None          # absolute or relative path
-    trace_content: Optional[str] = None       # raw text of trace (CSV-like)
-    trace_name: Optional[str] = "trace.txt"   # filename for temp trace
+    trace_path: Optional[str] = None       
+    trace_content: Optional[str] = None     
+    trace_name: Optional[str] = "trace.txt"  
     out_dir: Optional[str] = None
     seed: Optional[int] = None
-    config_options: Optional[Dict[str, Any]] = None  # key/value matching config parser
+    config_options: Optional[Dict[str, Any]] = None
 
 
 app = FastAPI(title="kv-sim backend")

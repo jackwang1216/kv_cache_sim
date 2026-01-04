@@ -146,14 +146,12 @@ bool write_summary(const std::string& out_dir,
     }
     ofs << "  \"evictions\": " << evict_count << ",\n";
 
-    // Phase 8: Extended metrics
     ofs << "  \"retry_attempts\": " << ext_metrics.retry_attempts << ",\n"
         << "  \"retry_successes\": " << ext_metrics.retry_successes << ",\n"
         << "  \"handoffs_total\": " << ext_metrics.handoffs_total << ",\n"
         << "  \"cross_gpu_decodes\": " << ext_metrics.cross_gpu_decodes << ",\n"
         << "  \"max_global_queue_depth\": " << ext_metrics.max_global_queue_depth << ",\n";
 
-    // Per-GPU metrics array
     ofs << "  \"per_gpu\": [\n";
     for (size_t i = 0; i < ext_metrics.peak_vram_per_gpu.size(); ++i) {
         ofs << "    {\"gpu_index\": " << i
@@ -235,9 +233,6 @@ bool write_run_meta(const std::string& out_dir, const SimConfig& cfg, std::strin
     if (!ofs.is_open()) { err = "cannot open run_meta"; return false; }
     auto now = std::chrono::system_clock::now().time_since_epoch();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-    // config_path parameter is needed; keep default hashing to 0 if missing
-    // (overload signature includes config_path; adjust signature to accept it)
-    // Placeholder to avoid compile error; real hash computed in overload below.
     std::uint64_t cfg_hash = 0;
 
     ofs << "{\n"

@@ -9,7 +9,6 @@ bool load_config(const std::string& path, SimConfig& cfg, std::string& err) {
     }
     int num_gpus_requested = static_cast<int>(cfg.gpus.size());
 
-    // Stub: if file missing, keep defaults; otherwise parse a simple key=value
     std::ifstream f(path);
     if (!f.is_open()) {
         err = "config file not found, using defaults";
