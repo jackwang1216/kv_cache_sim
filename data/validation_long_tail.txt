@@ -1,8 +1,0 @@
-# id arrival_ms prompt_tokens gen_tokens streaming(0/1)
-short1 0    60 120 0
-short2 20   70 110 0
-short3 40   65 130 0
-short4 60   55 100 0
-short5 80   60 115 0
-long1  100  600 900 0
-

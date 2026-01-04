@@ -24,6 +24,3 @@ __pycache__/
 *.pyc
 
 project_overview.tex
-timeline.md
-.claude
-Multi_GPU_Design.txt
