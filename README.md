@@ -22,7 +22,7 @@ Production systems like vLLM, TGI, and TensorRT-LLM solve these problems with co
 ## Design Philosophy
 
 1. **Model consequences, not implementations**
-   We don't implement CUDA kernels or actual tensors. We model their *performance and memory footprint*, which is the layer that matters for scheduling and capacity planning.
+   I didn't implement CUDA kernels or actual tensors. I model their *performance and memory footprint*, which is the layer that matters for scheduling and capacity planning.
 
 2. **Discrete-event precision**
    No time-stepping approximations. Events (arrivals, prefill completions, decode completions, handoffs) are processed in exact chronological order via a priority queue.
